@@ -1,7 +1,7 @@
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::Backend;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::TableState;
+use ratatui::widgets::{BarChart, TableState};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     widgets::{Block, Borders, Row, Table},
@@ -20,6 +20,8 @@ pub async fn viewer<B: Backend>(
     let mut table_state = TableState::default();
     table_state.select(Some(0));
     let mut devices = Vec::<DeviceInfo>::new();
+    let mut device_count_history: Vec<(String, u64)> = Vec::new();
+    let max_history_points: usize = 10;
 
     loop {
         // Draw UI
@@ -60,7 +62,7 @@ pub async fn viewer<B: Backend>(
                 ],
             )
             .header(
-                Row::new(vec!["Name", "TX Power", "Address", "RSSI"])
+                Row::new(vec!["Address", "Name", "TX Power", "RSSI"])
                     .style(Style::default().fg(Color::Yellow)),
             )
             .block(
@@ -71,6 +73,29 @@ pub async fn viewer<B: Backend>(
             .highlight_style(selected_style);
 
             f.render_stateful_widget(table, chunks[0], &mut table_state);
+
+            let barchart_data: Vec<(&str, u64)> = device_count_history
+                .iter()
+                .map(|(time, count)| (time.as_str(), *count))
+                .collect();
+            let barchart = BarChart::default()
+                .block(
+                    Block::default()
+                        .title("Devices Over Time")
+                        .borders(Borders::ALL),
+                )
+                .data(&barchart_data) // Use the adjusted data here
+                .bar_width(3)
+                .bar_gap(2)
+                .bar_style(Style::default().fg(Color::Cyan))
+                .value_style(
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            f.render_widget(barchart, chunks[1]);
         })?;
 
         // Event handling
@@ -112,8 +137,11 @@ pub async fn viewer<B: Backend>(
         // Check for new devices
         if let Ok(new_devices) = rx.try_recv() {
             devices = new_devices;
-            if table_state.selected().is_none() {
-                table_state.select(Some(0));
+            // Update the device count history
+            device_count_history.push(("Time".to_string(), devices.len() as u64));
+            // Ensure we keep only the latest `max_history_points` entries
+            if device_count_history.len() > max_history_points {
+                device_count_history.remove(0);
             }
         }
     }

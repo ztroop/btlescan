@@ -30,11 +30,11 @@ pub async fn bluetooth_scan(tx: mpsc::Sender<Vec<DeviceInfo>>) -> Result<(), Box
                     .unwrap_or_else(|| "Unknown".to_string());
                 let tx_power = properties
                     .tx_power_level
-                    .map_or_else(|| "N/A".to_string(), |tx| tx.to_string());
+                    .map_or_else(|| "n/a".to_string(), |tx| tx.to_string());
                 let address = properties.address.to_string();
                 let rssi = properties
                     .rssi
-                    .map_or_else(|| "N/A".to_string(), |rssi| rssi.to_string());
+                    .map_or_else(|| "n/a".to_string(), |rssi| rssi.to_string());
 
                 // Add the new device's information to the accumulated list
                 devices_info.push(DeviceInfo {
