@@ -1,6 +1,6 @@
-[![Build](https://github.com/ztroop/bluescan/actions/workflows/build.yml/badge.svg)](https://github.com/ztroop/bluescan/actions/workflows/build.yml)
+[![Build](https://github.com/ztroop/btlescan/actions/workflows/build.yml/badge.svg)](https://github.com/ztroop/btlescan/actions/workflows/build.yml)
 
-# bluescan
+# btlescan
 
 ## Summary
 
