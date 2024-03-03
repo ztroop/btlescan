@@ -25,24 +25,16 @@ pub async fn bluetooth_scan(tx: mpsc::Sender<Vec<DeviceInfo>>) -> Result<(), Box
                     .properties()
                     .await?
                     .unwrap_or(PeripheralProperties::default());
-                let name = properties
-                    .local_name
-                    .unwrap_or_else(|| "Unknown".to_string());
-                let tx_power = properties
-                    .tx_power_level
-                    .map_or_else(|| "n/a".to_string(), |tx| tx.to_string());
-                let address = properties.address.to_string();
-                let rssi = properties
-                    .rssi
-                    .map_or_else(|| "n/a".to_string(), |rssi| rssi.to_string());
 
                 // Add the new device's information to the accumulated list
-                devices_info.push(DeviceInfo {
-                    address,
-                    name,
-                    tx_power,
-                    rssi,
-                });
+                devices_info.push(DeviceInfo::new(
+                    properties.local_name,
+                    properties.tx_power_level,
+                    properties.address.to_string(),
+                    properties.rssi,
+                    properties.manufacturer_data,
+                    properties.services,
+                ));
 
                 // Send a clone of the accumulated device information so far
                 tx.send(devices_info.clone()).await?;
