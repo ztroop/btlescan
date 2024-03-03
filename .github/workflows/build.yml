@@ -15,6 +15,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features
       - name: Build
