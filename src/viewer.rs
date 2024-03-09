@@ -40,8 +40,13 @@ pub async fn viewer<B: Backend>(
                     } else {
                         Style::default()
                     };
+                    let device_address = if device.address == "00:00:00:00:00:00" {
+                        device.id.clone()
+                    } else {
+                        device.address.clone()
+                    };
                     Row::new(vec![
-                        device.address.clone(),
+                        device_address,
                         device.name.clone(),
                         device.tx_power.clone(),
                         device.rssi.clone(),
@@ -54,7 +59,7 @@ pub async fn viewer<B: Backend>(
             let table = Table::new(
                 rows,
                 [
-                    Constraint::Length(30),
+                    Constraint::Length(40),
                     Constraint::Length(30),
                     Constraint::Length(10),
                     Constraint::Length(10),

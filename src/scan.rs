@@ -28,6 +28,7 @@ pub async fn bluetooth_scan(tx: mpsc::Sender<Vec<DeviceInfo>>) -> Result<(), Box
 
                 // Add the new device's information to the accumulated list
                 devices_info.push(DeviceInfo::new(
+                    device.id().to_string(),
                     properties.local_name,
                     properties.tx_power_level,
                     properties.address.to_string(),

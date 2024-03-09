@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct DeviceInfo {
+    pub id: String,
     pub name: String,
     pub tx_power: String,
     pub address: String,
@@ -15,6 +16,7 @@ pub struct DeviceInfo {
 
 impl DeviceInfo {
     pub fn new(
+        id: String,
         name: Option<String>,
         tx_power: Option<i16>,
         address: String,
@@ -23,6 +25,7 @@ impl DeviceInfo {
         services: Vec<Uuid>,
     ) -> Self {
         DeviceInfo {
+            id,
             name: name.unwrap_or_else(|| "Unknown".to_string()),
             tx_power: tx_power.map_or_else(|| "n/a".to_string(), |tx| tx.to_string()),
             address,
