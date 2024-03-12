@@ -27,7 +27,14 @@ pub async fn viewer<B: Backend>(
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
-                .constraints([Constraint::Percentage(100)].as_ref())
+                .constraints(
+                    [
+                        Constraint::Percentage(70),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(10),
+                    ]
+                    .as_ref(),
+                )
                 .split(f.size());
 
             let selected_style = Style::default().add_modifier(Modifier::REVERSED);
@@ -50,7 +57,6 @@ pub async fn viewer<B: Backend>(
                         device.name.clone(),
                         device.tx_power.clone(),
                         device.rssi.clone(),
-                        device.detected_at.clone(),
                     ])
                     .style(style)
                 })
@@ -63,11 +69,10 @@ pub async fn viewer<B: Backend>(
                     Constraint::Length(30),
                     Constraint::Length(10),
                     Constraint::Length(10),
-                    Constraint::Length(20),
                 ],
             )
             .header(
-                Row::new(vec!["Address", "Name", "TX Power", "RSSI", "Detected At"])
+                Row::new(vec!["Address", "Name", "TX Power", "RSSI"])
                     .style(Style::default().fg(Color::Yellow)),
             )
             .block(
@@ -78,6 +83,33 @@ pub async fn viewer<B: Backend>(
             .highlight_style(selected_style);
 
             f.render_stateful_widget(table, chunks[0], &mut table_state);
+
+            // More details
+            let more_detail_chunk = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(100)])
+                .split(chunks[1]);
+            let binding = DeviceInfo::default();
+            let selected_device = devices
+                .get(table_state.selected().unwrap_or(0))
+                .unwrap_or(&binding);
+            let detail_table = Table::new(
+                vec![Row::new(vec!["Detected At", &selected_device.detected_at])],
+                [Constraint::Length(20), Constraint::Length(30)],
+            )
+            .block(Block::default().title("More Detail").borders(Borders::ALL));
+            f.render_widget(detail_table, more_detail_chunk[0]);
+
+            // Info table
+            let info_rows = vec![Row::new(vec!["[q → quit]", "[up/down → navigate]"])
+                .style(Style::default().fg(Color::DarkGray))];
+            let info_table =
+                Table::new(info_rows, [Constraint::Length(10), Constraint::Length(30)]);
+            let info_chunk = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(chunks[2]);
+            f.render_widget(info_table, info_chunk[0]);
         })?;
 
         // Event handling

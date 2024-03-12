@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DeviceInfo {
     pub id: String,
     pub name: String,
