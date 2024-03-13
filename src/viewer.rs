@@ -17,7 +17,7 @@ use crate::structs::DeviceInfo;
 
 fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (String, String) {
     let mut c = None;
-    let m = manufacturer_data
+    let mut m = manufacturer_data
         .iter()
         .map(|(&key, value)| {
             c = Some(key);
@@ -30,6 +30,7 @@ fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (Stri
         })
         .collect::<Vec<String>>()
         .join(" ");
+    m = if m.is_empty() { "n/a".to_string() } else { m };
     match c {
         Some(code) => (COMPANY_CODE.get(&code).unwrap_or(&"n/a").to_string(), m),
         None => ("n/a".to_string(), m),
@@ -112,10 +113,10 @@ pub async fn viewer<B: Backend>(
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(100)])
                 .split(chunks[1]);
-            let binding = DeviceInfo::default();
+            let device_binding = DeviceInfo::default();
             let selected_device = devices
                 .get(table_state.selected().unwrap_or(0))
-                .unwrap_or(&binding);
+                .unwrap_or(&device_binding);
             let services_binding = selected_device.services.len().to_string();
             let manufacturer_data = extract_manufacturer_data(&selected_device.manufacturer_data);
             let detail_table = Table::new(
