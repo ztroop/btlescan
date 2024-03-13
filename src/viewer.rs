@@ -7,11 +7,34 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table},
     Terminal,
 };
+use std::collections::HashMap;
 use std::error::Error;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::company_codes::COMPANY_CODE;
 use crate::structs::DeviceInfo;
+
+fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (String, String) {
+    let mut c = None;
+    let m = manufacturer_data
+        .iter()
+        .map(|(&key, value)| {
+            c = Some(key);
+            let hex_string = value
+                .iter()
+                .map(|byte| format!("{:02X}", byte))
+                .collect::<Vec<String>>()
+                .join(" ");
+            hex_string.to_string()
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+    match c {
+        Some(code) => (COMPANY_CODE.get(&code).unwrap_or(&"n/a").to_string(), m),
+        None => ("n/a".to_string(), m),
+    }
+}
 
 pub async fn viewer<B: Backend>(
     terminal: &mut Terminal<B>,
@@ -93,9 +116,17 @@ pub async fn viewer<B: Backend>(
             let selected_device = devices
                 .get(table_state.selected().unwrap_or(0))
                 .unwrap_or(&binding);
+            let services_binding = selected_device.services.len().to_string();
+            let manufacturer_data = extract_manufacturer_data(&selected_device.manufacturer_data);
             let detail_table = Table::new(
-                vec![Row::new(vec!["Detected At", &selected_device.detected_at])],
-                [Constraint::Length(20), Constraint::Length(30)],
+                vec![
+                    Row::new(vec!["Detected At:", &selected_device.detected_at]),
+                    // get count of services
+                    Row::new(vec!["Services:", &services_binding]),
+                    Row::new(vec!["Company Code Identifier:", &manufacturer_data.0]),
+                    Row::new(vec!["Manufacturer Data:", &manufacturer_data.1]),
+                ],
+                [Constraint::Length(30), Constraint::Length(70)],
             )
             .block(Block::default().title("More Detail").borders(Borders::ALL));
             f.render_widget(detail_table, more_detail_chunk[0]);

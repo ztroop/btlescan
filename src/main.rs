@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate lazy_static;
 use crate::viewer::viewer;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -9,6 +11,7 @@ use scan::bluetooth_scan;
 use std::{error::Error, io};
 use tokio::sync::mpsc;
 
+mod company_codes;
 mod scan;
 mod structs;
 mod viewer;
