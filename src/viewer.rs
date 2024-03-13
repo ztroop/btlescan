@@ -133,13 +133,24 @@ pub async fn viewer<B: Backend>(
             f.render_widget(detail_table, more_detail_chunk[0]);
 
             // Info table
-            let info_rows = vec![Row::new(vec!["[q → quit]", "[up/down → navigate]"])
-                .style(Style::default().fg(Color::DarkGray))];
-            let info_table =
-                Table::new(info_rows, [Constraint::Length(10), Constraint::Length(30)]);
+            let info_rows = vec![Row::new(vec![
+                "[q → quit]",
+                "[up/down → navigate]",
+                "[s → stop scanning]",
+            ])
+            .style(Style::default().fg(Color::DarkGray))];
+            let info_table = Table::new(
+                info_rows,
+                [
+                    Constraint::Length(10),
+                    Constraint::Length(20),
+                    Constraint::Length(20),
+                ],
+            )
+            .column_spacing(1);
             let info_chunk = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .constraints([Constraint::Percentage(100)])
                 .split(chunks[2]);
             f.render_widget(info_table, info_chunk[0]);
         })?;
@@ -149,6 +160,10 @@ pub async fn viewer<B: Backend>(
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('s') => {
+                        // Stop scanning
+                        rx.close();
+                    }
                     KeyCode::Down => {
                         let next = match table_state.selected() {
                             Some(selected) => {
