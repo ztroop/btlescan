@@ -8,7 +8,11 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use scan::bluetooth_scan;
-use std::{error::Error, io};
+use std::{
+    error::Error,
+    io,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tokio::sync::mpsc;
 
 mod company_codes;
@@ -25,14 +29,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let (tx, rx) = mpsc::channel(100);
+    let pause_signal = Arc::new(AtomicBool::new(false));
+    let pause_signal_clone = Arc::clone(&pause_signal);
 
     tokio::spawn(async move {
-        if let Err(e) = bluetooth_scan(tx).await {
+        if let Err(e) = bluetooth_scan(tx, pause_signal_clone).await {
             eprintln!("Error during Bluetooth scan: {}", e);
         }
     });
 
-    if let Err(e) = viewer(&mut terminal, rx).await {
+    if let Err(e) = viewer(&mut terminal, rx, pause_signal).await {
         eprintln!("Error running application: {}", e);
     }
 

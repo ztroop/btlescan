@@ -4,11 +4,16 @@ use btleplug::api::{
 use btleplug::platform::Manager;
 use futures::StreamExt;
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::structs::DeviceInfo;
 
-pub async fn bluetooth_scan(tx: mpsc::Sender<Vec<DeviceInfo>>) -> Result<(), Box<dyn Error>> {
+pub async fn bluetooth_scan(
+    tx: mpsc::Sender<Vec<DeviceInfo>>,
+    pause_signal: Arc<AtomicBool>,
+) -> Result<(), Box<dyn Error>> {
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
     let central = adapters.into_iter().next().ok_or("No adapters found")?;
@@ -19,6 +24,11 @@ pub async fn bluetooth_scan(tx: mpsc::Sender<Vec<DeviceInfo>>) -> Result<(), Box
     let mut devices_info = Vec::new();
 
     while let Some(event) = events.next().await {
+        // Check the pause signal before processing the event
+        while pause_signal.load(Ordering::SeqCst) {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
         if let CentralEvent::DeviceDiscovered(id) = event {
             if let Ok(device) = central.peripheral(&id).await {
                 let properties = device

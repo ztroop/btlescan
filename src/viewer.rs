@@ -9,6 +9,8 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -40,6 +42,7 @@ fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (Stri
 pub async fn viewer<B: Backend>(
     terminal: &mut Terminal<B>,
     mut rx: mpsc::Receiver<Vec<DeviceInfo>>,
+    pause_signal: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn Error>> {
     let mut table_state = TableState::default();
     table_state.select(Some(0));
@@ -133,10 +136,15 @@ pub async fn viewer<B: Backend>(
             f.render_widget(detail_table, more_detail_chunk[0]);
 
             // Info table
+            let current_state = pause_signal.load(Ordering::SeqCst);
             let info_rows = vec![Row::new(vec![
                 "[q → quit]",
                 "[up/down → navigate]",
-                "[s → stop scanning]",
+                if current_state {
+                    "[s → start scanning]"
+                } else {
+                    "[s → stop scanning]"
+                },
             ])
             .style(Style::default().fg(Color::DarkGray))];
             let info_table = Table::new(
@@ -161,8 +169,8 @@ pub async fn viewer<B: Backend>(
                 match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Char('s') => {
-                        // Stop scanning
-                        rx.close();
+                        let current_state = pause_signal.load(Ordering::SeqCst);
+                        pause_signal.store(!current_state, Ordering::SeqCst);
                     }
                     KeyCode::Down => {
                         let next = match table_state.selected() {
