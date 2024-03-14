@@ -20,6 +20,7 @@ mod scan;
 mod structs;
 mod utils;
 mod viewer;
+mod widgets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -43,7 +44,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("Error running application: {}", e);
     }
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
