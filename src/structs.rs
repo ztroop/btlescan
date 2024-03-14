@@ -13,6 +13,7 @@ pub struct DeviceInfo {
     pub manufacturer_data: HashMap<u16, Vec<u8>>,
     pub services: Vec<Uuid>,
     pub detected_at: String,
+    pub service_data: HashMap<Uuid, Vec<u8>>,
 }
 
 impl DeviceInfo {
@@ -25,6 +26,7 @@ impl DeviceInfo {
         rssi: Option<i16>,
         manufacturer_data: HashMap<u16, Vec<u8>>,
         services: Vec<Uuid>,
+        service_data: HashMap<Uuid, Vec<u8>>,
     ) -> Self {
         DeviceInfo {
             id,
@@ -35,6 +37,7 @@ impl DeviceInfo {
             manufacturer_data,
             services,
             detected_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            service_data
         }
     }
 }

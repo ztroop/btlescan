@@ -9,6 +9,7 @@ pub fn info_table(signal: bool) -> Table<'static> {
     let info_rows = vec![Row::new(vec![
         "[q → quit]",
         "[up/down → navigate]",
+        "[enter → inspection]",
         if signal {
             "[s → start scanning]"
         } else {
@@ -20,6 +21,7 @@ pub fn info_table(signal: bool) -> Table<'static> {
         info_rows,
         [
             Constraint::Length(10),
+            Constraint::Length(20),
             Constraint::Length(20),
             Constraint::Length(20),
         ],

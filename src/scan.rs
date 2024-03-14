@@ -47,6 +47,7 @@ pub async fn bluetooth_scan(
                     properties.rssi,
                     properties.manufacturer_data,
                     properties.services,
+                    properties.service_data,
                 ));
 
                 // Send a clone of the accumulated device information so far

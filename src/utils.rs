@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use ratatui::layout::Rect;
+
 use crate::company_codes::COMPANY_CODE;
 
 /// Extracts the manufacturer data from a `HashMap<u16, Vec<u8>>` and returns a tuple with the company name and the manufacturer data as a string.
@@ -24,5 +26,19 @@ pub fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (
     match c {
         Some(code) => (COMPANY_CODE.get(&code).unwrap_or(&"n/a").to_string(), m),
         None => ("n/a".to_string(), m),
+    }
+}
+
+/// Returns a `Rect` with the provided percentage of the parent `Rect` and centered.
+pub fn centered_rect(percent_x: u16, percent_y: u16, size: Rect) -> Rect {
+    let popup_size = Rect {
+        width: size.width * percent_x / 100,
+        height: size.height * percent_y / 100,
+        ..Rect::default()
+    };
+    Rect {
+        x: (size.width - popup_size.width) / 2,
+        y: (size.height - popup_size.height) / 2,
+        ..popup_size
     }
 }

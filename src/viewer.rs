@@ -1,6 +1,6 @@
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::Backend;
-use ratatui::widgets::TableState;
+use ratatui::widgets::{Clear, TableState};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     Terminal,
@@ -12,9 +12,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::structs::DeviceInfo;
+use crate::utils::centered_rect;
 use crate::widgets::detail_table::detail_table;
 use crate::widgets::device_table::device_table;
 use crate::widgets::info_table::info_table;
+use crate::widgets::inspect_overlay::inspect_overlay;
 
 /// Displays the detected Bluetooth devices in a table and handles the user input.
 /// The user can navigate the table, pause the scanning, and quit the application.
@@ -27,6 +29,7 @@ pub async fn viewer<B: Backend>(
     let mut table_state = TableState::default();
     table_state.select(Some(0));
     let mut devices = Vec::<DeviceInfo>::new();
+    let mut inspect_view = false;
 
     loop {
         // Draw UI
@@ -55,6 +58,17 @@ pub async fn viewer<B: Backend>(
             // Draw the info table
             let info_table = info_table(pause_signal.load(Ordering::SeqCst));
             f.render_widget(info_table, chunks[2]);
+
+            let selected = table_state.selected();
+            if inspect_view && selected.is_some() {
+                let device: &DeviceInfo = &devices[selected.unwrap()];
+                if !device.service_data.is_empty() {
+                    let inspect_overlay = inspect_overlay(device);
+                    let area = centered_rect(60, 60, f.size());
+                    f.render_widget(Clear, area);
+                    f.render_widget(inspect_overlay, area);
+                }
+            }
         })?;
 
         // Event handling
@@ -65,6 +79,9 @@ pub async fn viewer<B: Backend>(
                     KeyCode::Char('s') => {
                         let current_state = pause_signal.load(Ordering::SeqCst);
                         pause_signal.store(!current_state, Ordering::SeqCst);
+                    }
+                    KeyCode::Enter => {
+                        inspect_view = !inspect_view;
                     }
                     KeyCode::Down => {
                         let next = match table_state.selected() {
