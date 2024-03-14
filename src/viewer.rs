@@ -7,38 +7,18 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table},
     Terminal,
 };
-use std::collections::HashMap;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::company_codes::COMPANY_CODE;
 use crate::structs::DeviceInfo;
+use crate::utils::extract_manufacturer_data;
 
-fn extract_manufacturer_data(manufacturer_data: &HashMap<u16, Vec<u8>>) -> (String, String) {
-    let mut c = None;
-    let mut m = manufacturer_data
-        .iter()
-        .map(|(&key, value)| {
-            c = Some(key);
-            let hex_string = value
-                .iter()
-                .map(|byte| format!("{:02X}", byte))
-                .collect::<Vec<String>>()
-                .join(" ");
-            hex_string.to_string()
-        })
-        .collect::<Vec<String>>()
-        .join(" ");
-    m = if m.is_empty() { "n/a".to_string() } else { m };
-    match c {
-        Some(code) => (COMPANY_CODE.get(&code).unwrap_or(&"n/a").to_string(), m),
-        None => ("n/a".to_string(), m),
-    }
-}
-
+/// Displays the detected Bluetooth devices in a table and handles the user input.
+/// The user can navigate the table, pause the scanning, and quit the application.
+/// The detected devices are received through the provided `mpsc::Receiver`.
 pub async fn viewer<B: Backend>(
     terminal: &mut Terminal<B>,
     mut rx: mpsc::Receiver<Vec<DeviceInfo>>,

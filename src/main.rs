@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 mod company_codes;
 mod scan;
 mod structs;
+mod utils;
 mod viewer;
 
 #[tokio::main]

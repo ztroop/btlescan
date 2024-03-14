@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+/// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
 pub struct DeviceInfo {
     pub id: String,
@@ -15,6 +16,7 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
+    /// Creates a new `DeviceInfo` with the provided information.
     pub fn new(
         id: String,
         name: Option<String>,
