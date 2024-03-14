@@ -4,7 +4,7 @@
 
 ## Summary
 
-This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a neatly organized table format.
+This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a table format.
 
 ## Features
 
@@ -29,4 +29,4 @@ cargo install --path .
 
 ## Alternatives
 
-- See [bluetui] for managing or pairing Bluetooth devices.
+If you're looking to manage or pair Bluetooth devices, check out [bluetui](https://github.com/pythops/bluetui)!
