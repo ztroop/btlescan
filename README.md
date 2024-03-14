@@ -4,7 +4,7 @@
 
 ## Summary
 
-This tool provides a CLI with a real-time, interactive way to view Bluetooth devices, showcasing their Name, TX Power, Address, and RSSI (Received Signal Strength Indicator) in a neatly organized table format.
+This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a neatly organized table format.
 
 ## Features
 
@@ -19,3 +19,14 @@ This tool provides a CLI with a real-time, interactive way to view Bluetooth dev
     - **Up/Down Arrows**: Scroll through the list of devices.
     - **Q**: Quit the application.
     - **S**: Toggle scanning.
+
+## Installation
+
+```sh
+git clone git@github.com:ztroop/btlescan.git && cd ./btlescan
+cargo install --path .
+```
+
+## Alternatives
+
+- See [bluetui] for managing or pairing Bluetooth devices.

@@ -52,6 +52,7 @@ pub async fn viewer<B: Backend>(
             let detail_table = detail_table(table_state.selected(), &devices);
             f.render_widget(detail_table, chunks[1]);
 
+            // Draw the info table
             let info_table = info_table(pause_signal.load(Ordering::SeqCst));
             f.render_widget(info_table, chunks[2]);
         })?;
