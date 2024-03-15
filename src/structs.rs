@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use btleplug::api::CharPropFlags;
 use uuid::Uuid;
 
 /// A struct to hold the information of a Bluetooth device.
@@ -37,7 +38,18 @@ impl DeviceInfo {
             manufacturer_data,
             services,
             detected_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            service_data
+            service_data,
         }
     }
+}
+
+pub struct Characteristic {
+    pub uuid: Uuid,
+    pub properties: CharPropFlags,
+    pub descriptors: Vec<Uuid>,
+}
+
+pub struct ManufacturerData {
+    pub company_code: String,
+    pub data: String,
 }

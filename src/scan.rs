@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::structs::DeviceInfo;
+use crate::structs::{Characteristic, DeviceInfo};
 
 /// Scans for Bluetooth devices and sends the information to the provided `mpsc::Sender`.
 /// The scan can be paused by setting the `pause_signal` to `true`.
@@ -57,4 +57,10 @@ pub async fn bluetooth_scan(
     }
 
     Ok(())
+}
+
+/// Gets the characteristics of a Bluetooth device and returns them as a `Vec<Characteristic>`.
+/// The device is identified by its address or UUID.
+pub async fn get_characteristics(_device_id: &str) -> Result<Vec<Characteristic>, Box<dyn Error>> {
+    unimplemented!();
 }
