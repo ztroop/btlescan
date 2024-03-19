@@ -84,7 +84,7 @@ pub async fn viewer<B: Backend>(
                 let error_message_clone = error_message.clone();
                 let area = centered_rect(60, 10, f.size());
                 let error_block = Paragraph::new(Span::from(error_message_clone))
-                    .alignment(Alignment::Center) // This centers the text horizontally
+                    .alignment(Alignment::Center)
                     .block(Block::default().borders(Borders::ALL).title("Notification"));
                 f.render_widget(Clear, area);
                 f.render_widget(error_block, area);
