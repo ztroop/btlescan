@@ -6,9 +6,12 @@ use btleplug::api::{
 use btleplug::platform::{Manager, PeripheralId};
 use futures::StreamExt;
 use std::error::Error;
+#[cfg(target_os = "linux")]
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+#[cfg(target_os = "macos")]
 use uuid::Uuid;
 
 use crate::structs::{Characteristic, DeviceInfo};
