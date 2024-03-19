@@ -7,7 +7,7 @@ use ratatui::{
 use crate::structs::Characteristic;
 
 /// Provides an overlay with the selected device's service data.
-pub fn inspect_overlay(characteristics: &Vec<Characteristic>) -> Table<'static> {
+pub fn inspect_overlay(characteristics: &[Characteristic]) -> Table<'static> {
     // Iterate through the selected device's characteristics to create rows
     let rows: Vec<Row> = characteristics
         .iter()

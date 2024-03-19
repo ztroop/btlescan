@@ -18,13 +18,8 @@ pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo]) -> Table {
             } else {
                 Style::default()
             };
-            let device_address = if device.address == "00:00:00:00:00:00" {
-                device.id.clone()
-            } else {
-                device.address.clone()
-            };
             Row::new(vec![
-                device_address,
+                device.get_id(),
                 device.name.clone(),
                 device.tx_power.clone(),
                 device.rssi.clone(),

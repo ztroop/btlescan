@@ -1,6 +1,8 @@
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::Backend;
-use ratatui::widgets::TableState;
+use ratatui::layout::Alignment;
+use ratatui::text::Span;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, TableState};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     Terminal,
@@ -11,10 +13,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::structs::DeviceInfo;
+use crate::scan::get_characteristics;
+use crate::structs::{Characteristic, DeviceInfo};
+use crate::utils::centered_rect;
 use crate::widgets::detail_table::detail_table;
 use crate::widgets::device_table::device_table;
 use crate::widgets::info_table::info_table;
+use crate::widgets::inspect_overlay::inspect_overlay;
 
 /// Displays the detected Bluetooth devices in a table and handles the user input.
 /// The user can navigate the table, pause the scanning, and quit the application.
@@ -27,8 +32,11 @@ pub async fn viewer<B: Backend>(
     let mut table_state = TableState::default();
     table_state.select(Some(0));
     let mut devices = Vec::<DeviceInfo>::new();
-    // let mut inspect_view = false;
-    // let mut selected_characteristics: Vec<Characteristic> = Vec::new();
+    let mut inspect_view = false;
+    let mut selected_characteristics: Vec<Characteristic> = Vec::new();
+
+    let mut error_view = false;
+    let mut error_message = String::new();
 
     loop {
         // Draw UI
@@ -56,31 +64,64 @@ pub async fn viewer<B: Backend>(
             f.render_stateful_widget(device_table, chunks[0], &mut table_state);
 
             // Draw the detail table
-            let detail_table = detail_table(&selected_device);
+            let detail_table = detail_table(selected_device);
             f.render_widget(detail_table, chunks[1]);
 
             // Draw the info table
             let info_table = info_table(pause_signal.load(Ordering::SeqCst));
             f.render_widget(info_table, chunks[2]);
 
-            // if inspect_view {
-            //     let inspect_overlay = inspect_overlay(&selected_characteristics);
-            //     let area = centered_rect(60, 60, f.size());
-            //     f.render_widget(Clear, area);
-            //     f.render_widget(inspect_overlay, area);
-            // }
+            // Draw the inspect overlay
+            if inspect_view {
+                let inspect_overlay = inspect_overlay(&selected_characteristics);
+                let area = centered_rect(60, 60, f.size());
+                f.render_widget(Clear, area);
+                f.render_widget(inspect_overlay, area);
+            }
+
+            // Draw the error overlay
+            if error_view {
+                let error_message_clone = error_message.clone();
+                let area = centered_rect(60, 10, f.size());
+                let error_block = Paragraph::new(Span::from(error_message_clone))
+                    .alignment(Alignment::Center) // This centers the text horizontally
+                    .block(Block::default().borders(Borders::ALL).title("Notification"));
+                f.render_widget(Clear, area);
+                f.render_widget(error_block, area);
+            }
         })?;
 
         // Event handling
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') => break,
+                    KeyCode::Char('q') => {
+                        if error_view {
+                            error_view = false;
+                        } else {
+                            break;
+                        }
+                    }
                     KeyCode::Char('s') => {
                         let current_state = pause_signal.load(Ordering::SeqCst);
                         pause_signal.store(!current_state, Ordering::SeqCst);
                     }
-                    KeyCode::Enter => {}
+                    KeyCode::Enter => {
+                        let device_binding = &DeviceInfo::default();
+                        let selected_device = devices
+                            .get(table_state.selected().unwrap_or(0))
+                            .unwrap_or(device_binding);
+                        match get_characteristics(&selected_device.get_id()).await {
+                            Ok(characteristics) => {
+                                selected_characteristics = characteristics;
+                                inspect_view = !inspect_view;
+                            }
+                            Err(e) => {
+                                error_message = format!("Error getting characteristics: {}", e);
+                                error_view = true;
+                            }
+                        }
+                    }
                     KeyCode::Down => {
                         let next = match table_state.selected() {
                             Some(selected) => {

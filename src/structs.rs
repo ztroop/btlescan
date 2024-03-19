@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
 pub struct DeviceInfo {
-    pub id: String,
+    pub uuid: String,
     pub name: String,
     pub tx_power: String,
     pub address: String,
@@ -19,8 +19,9 @@ pub struct DeviceInfo {
 
 impl DeviceInfo {
     /// Creates a new `DeviceInfo` with the provided information.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: String,
+        uuid: String,
         name: Option<String>,
         tx_power: Option<i16>,
         address: String,
@@ -29,8 +30,8 @@ impl DeviceInfo {
         services: Vec<Uuid>,
         service_data: HashMap<Uuid, Vec<u8>>,
     ) -> Self {
-        DeviceInfo {
-            id,
+        Self {
+            uuid,
             name: name.unwrap_or_else(|| "Unknown".to_string()),
             tx_power: tx_power.map_or_else(|| "n/a".to_string(), |tx| tx.to_string()),
             address,
@@ -41,14 +42,25 @@ impl DeviceInfo {
             service_data,
         }
     }
+
+    pub fn get_id(&self) -> String {
+        // Returns the `uuid` or `address` of the device if MacOS or Linux.
+        if cfg!(target_os = "macos") {
+            self.uuid.clone()
+        } else {
+            self.address.clone()
+        }
+    }
 }
 
+/// A struct to hold the information of a GATT Characteristic.
 pub struct Characteristic {
     pub uuid: Uuid,
     pub properties: CharPropFlags,
     pub descriptors: Vec<Uuid>,
 }
 
+/// A struct to hold the information of a GATT Descriptor.
 pub struct ManufacturerData {
     pub company_code: String,
     pub data: String,
