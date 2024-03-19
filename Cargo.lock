@@ -161,6 +161,7 @@ dependencies = [
 name = "btlescan"
 version = "0.1.0"
 dependencies = [
+ "bluez-async",
  "btleplug",
  "chrono",
  "crossterm 0.22.1",
