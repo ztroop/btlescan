@@ -17,8 +17,9 @@ This tool provides a cross-platform CLI with an interactive way to view Bluetoot
 - Interactive UI: The terminal-based user interface allows users to scroll through the list of discovered devices, providing an easy way to browse and select devices of interest.
 - Keyboard Navigation: Supports simple keyboard controls for navigation:
     - **Up/Down Arrows**: Scroll through the list of devices.
-    - **Q**: Quit the application.
+    - **ESC**: Quit the application.
     - **S**: Toggle scanning.
+    - **ENTER**: Inspect or close widget.
 
 ## Installation
 

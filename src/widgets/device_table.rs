@@ -38,12 +38,12 @@ pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo]) -> Table {
         ],
     )
     .header(
-        Row::new(vec!["Address", "Name", "TX Power", "RSSI"])
+        Row::new(vec!["Identifier", "Name", "TX Power", "RSSI"])
             .style(Style::default().fg(Color::Yellow)),
     )
     .block(
         Block::default()
-            .title("Detected Bluetooth Devices")
+            .title("Detected Devices")
             .borders(Borders::ALL),
     )
     .highlight_style(selected_style);

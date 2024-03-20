@@ -95,30 +95,35 @@ pub async fn viewer<B: Backend>(
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') => {
-                        if error_view {
-                            error_view = false;
-                        } else {
-                            break;
-                        }
+                    KeyCode::Esc => {
+                        break;
                     }
                     KeyCode::Char('s') => {
                         let current_state = pause_signal.load(Ordering::SeqCst);
                         pause_signal.store(!current_state, Ordering::SeqCst);
                     }
                     KeyCode::Enter => {
-                        let device_binding = &DeviceInfo::default();
-                        let selected_device = devices
-                            .get(table_state.selected().unwrap_or(0))
-                            .unwrap_or(device_binding);
-                        match get_characteristics(&selected_device.get_id()).await {
-                            Ok(characteristics) => {
-                                selected_characteristics = characteristics;
-                                inspect_view = !inspect_view;
-                            }
-                            Err(e) => {
-                                error_message = format!("Error getting characteristics: {}", e);
-                                error_view = true;
+                        if error_view {
+                            error_view = false;
+                        } else if inspect_view {
+                            inspect_view = false;
+                        } else {
+                            let device_binding = &DeviceInfo::default();
+                            let selected_device = devices
+                                .get(table_state.selected().unwrap_or(0))
+                                .unwrap_or(device_binding);
+                            pause_signal.store(true, Ordering::SeqCst);
+                            match get_characteristics(&selected_device.device.clone().unwrap())
+                                .await
+                            {
+                                Ok(characteristics) => {
+                                    selected_characteristics = characteristics;
+                                    inspect_view = !inspect_view;
+                                }
+                                Err(e) => {
+                                    error_message = format!("Error getting characteristics: {}", e);
+                                    error_view = true;
+                                }
                             }
                         }
                     }

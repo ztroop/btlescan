@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
 pub struct DeviceInfo {
-    pub uuid: String,
+    pub id: String,
     pub name: String,
     pub tx_power: String,
     pub address: String,
@@ -15,13 +15,14 @@ pub struct DeviceInfo {
     pub services: Vec<Uuid>,
     pub detected_at: String,
     pub service_data: HashMap<Uuid, Vec<u8>>,
+    pub device: Option<btleplug::platform::Peripheral>,
 }
 
 impl DeviceInfo {
     /// Creates a new `DeviceInfo` with the provided information.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        uuid: String,
+        id: String,
         name: Option<String>,
         tx_power: Option<i16>,
         address: String,
@@ -29,9 +30,10 @@ impl DeviceInfo {
         manufacturer_data: HashMap<u16, Vec<u8>>,
         services: Vec<Uuid>,
         service_data: HashMap<Uuid, Vec<u8>>,
+        device: btleplug::platform::Peripheral,
     ) -> Self {
         Self {
-            uuid,
+            id,
             name: name.unwrap_or_else(|| "Unknown".to_string()),
             tx_power: tx_power.map_or_else(|| "n/a".to_string(), |tx| tx.to_string()),
             address,
@@ -40,13 +42,14 @@ impl DeviceInfo {
             services,
             detected_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             service_data,
+            device: Some(device),
         }
     }
 
     pub fn get_id(&self) -> String {
         // Returns the `uuid` or `address` of the device if MacOS or Linux.
         if cfg!(target_os = "macos") {
-            self.uuid.clone()
+            self.id.clone()
         } else {
             self.address.clone()
         }

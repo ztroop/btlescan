@@ -1,20 +1,13 @@
-#[cfg(target_os = "linux")]
-use bluez_async::MacAddress;
+use crate::structs::{Characteristic, DeviceInfo};
 use btleplug::api::{
     Central, CentralEvent, Manager as _, Peripheral, PeripheralProperties, ScanFilter,
 };
-use btleplug::platform::{Manager, PeripheralId};
+use btleplug::platform::Manager;
 use futures::StreamExt;
 use std::error::Error;
-#[cfg(target_os = "linux")]
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-#[cfg(target_os = "macos")]
-use uuid::Uuid;
-
-use crate::structs::{Characteristic, DeviceInfo};
 
 /// Scans for Bluetooth devices and sends the information to the provided `mpsc::Sender`.
 /// The scan can be paused by setting the `pause_signal` to `true`.
@@ -54,6 +47,7 @@ pub async fn bluetooth_scan(
                     properties.manufacturer_data,
                     properties.services,
                     properties.service_data,
+                    device.clone(),
                 ));
 
                 // Send a clone of the accumulated device information so far
@@ -67,29 +61,9 @@ pub async fn bluetooth_scan(
 
 /// Gets the characteristics of a Bluetooth device and returns them as a `Vec<Characteristic>`.
 /// The device is identified by its address or UUID.
-pub async fn get_characteristics(id: &str) -> Result<Vec<Characteristic>, Box<dyn Error>> {
-    let manager = Manager::new().await?;
-    let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().next().ok_or("No adapters found")?;
-
-    let peripheral_id: Option<PeripheralId>;
-    #[cfg(target_os = "macos")]
-    {
-        let uuid_id = Uuid::parse_str(id)?;
-        peripheral_id = Some(PeripheralId::from(uuid_id));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let mac_addr = MacAddress::from_str(id)?;
-        peripheral_id = Some(PeripheralId::from(mac_addr));
-    }
-
-    // Short circuit if no peripheral is not found
-    if peripheral_id.is_none() {
-        return Err("Peripheral not found".into());
-    }
-
-    let peripheral = central.peripheral(&peripheral_id.unwrap()).await?;
+pub async fn get_characteristics(
+    peripheral: &btleplug::platform::Peripheral,
+) -> Result<Vec<Characteristic>, Box<dyn Error>> {
     peripheral.connect().await?;
 
     let characteristics = peripheral.characteristics();
