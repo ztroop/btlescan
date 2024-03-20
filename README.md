@@ -4,7 +4,9 @@
 
 ## Summary
 
-This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a table format.
+This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a table format. It also provides functionality to inspect GATT information.
+
+![demo](./assets/demo.png)
 
 ## Features
 
