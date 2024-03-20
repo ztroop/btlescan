@@ -19,7 +19,7 @@ This tool provides a cross-platform CLI with an interactive way to view Bluetoot
     - **Up/Down Arrows**: Scroll through the list of devices.
     - **Q**: Quit the application.
     - **S**: Toggle scanning.
-    - **ENTER**: Inspect or close widget.
+    - **ENTER**: Open or close widget.
 
 ## Installation
 
