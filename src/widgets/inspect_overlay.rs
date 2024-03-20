@@ -6,15 +6,21 @@ use ratatui::{
 
 use crate::structs::Characteristic;
 
-/// Provides an overlay with the selected device's service data.
-pub fn inspect_overlay(characteristics: &[Characteristic]) -> Table<'static> {
+/// Provides an overlay with the selected device's services.
+pub fn inspect_overlay(
+    characteristics: &[Characteristic],
+    scroll: usize,
+    height: u16,
+) -> Table<'static> {
     let mut rows: Vec<Row> = Vec::new();
 
     for characteristic in characteristics.iter() {
         let service_uuid = characteristic.service.to_string();
-        rows.push(Row::new(vec![format!("Service: {service_uuid}")]));
+        rows.push(
+            Row::new(vec![format!("Service: {service_uuid}")])
+                .style(Style::default().fg(Color::Gray)),
+        );
 
-        // Get flags from CharPropFlags and convert them to a string for the characteristic
         let properties = format!(
             "{:?}",
             characteristic
@@ -40,13 +46,25 @@ pub fn inspect_overlay(characteristics: &[Characteristic]) -> Table<'static> {
         }
     }
 
-    let table = Table::new(rows, [Constraint::Percentage(100)])
+    let adjusted_height = if height > 3 { height - 3 } else { height };
+    let visible_rows_count = adjusted_height as usize;
+
+    let total_rows = rows.len();
+    let start_index = scroll;
+    let end_index = usize::min(start_index + visible_rows_count, total_rows);
+
+    let visible_rows = if start_index < total_rows {
+        &rows[start_index..end_index]
+    } else {
+        &[]
+    };
+
+    Table::new(visible_rows.to_vec(), [Constraint::Percentage(100)])
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Inspecting GATT Characteristics")
+                .title("Characteristics")
                 .border_style(Style::default().fg(Color::Yellow)),
         )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-    table
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
 }

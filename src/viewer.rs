@@ -33,6 +33,7 @@ pub async fn viewer<B: Backend>(
     table_state.select(Some(0));
     let mut devices = Vec::<DeviceInfo>::new();
     let mut inspect_view = false;
+    let mut inspect_overlay_scroll: usize = 0;
     let mut selected_characteristics: Vec<Characteristic> = Vec::new();
 
     let mut error_view = false;
@@ -73,8 +74,12 @@ pub async fn viewer<B: Backend>(
 
             // Draw the inspect overlay
             if inspect_view {
-                let inspect_overlay = inspect_overlay(&selected_characteristics);
                 let area = centered_rect(80, 60, f.size());
+                let inspect_overlay = inspect_overlay(
+                    &selected_characteristics,
+                    inspect_overlay_scroll,
+                    area.height,
+                );
                 f.render_widget(Clear, area);
                 f.render_widget(inspect_overlay, area);
             }
@@ -95,7 +100,7 @@ pub async fn viewer<B: Backend>(
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Esc => {
+                    KeyCode::Char('q') => {
                         break;
                     }
                     KeyCode::Char('s') => {
@@ -128,30 +133,38 @@ pub async fn viewer<B: Backend>(
                         }
                     }
                     KeyCode::Down => {
-                        let next = match table_state.selected() {
-                            Some(selected) => {
-                                if selected >= devices.len() - 1 {
-                                    0
-                                } else {
-                                    selected + 1
+                        if inspect_view {
+                            inspect_overlay_scroll += 1;
+                        } else {
+                            let next = match table_state.selected() {
+                                Some(selected) => {
+                                    if selected >= devices.len() - 1 {
+                                        0
+                                    } else {
+                                        selected + 1
+                                    }
                                 }
-                            }
-                            None => 0,
-                        };
-                        table_state.select(Some(next));
+                                None => 0,
+                            };
+                            table_state.select(Some(next));
+                        }
                     }
                     KeyCode::Up => {
-                        let previous = match table_state.selected() {
-                            Some(selected) => {
-                                if selected == 0 {
-                                    devices.len() - 1
-                                } else {
-                                    selected - 1
+                        if inspect_view {
+                            inspect_overlay_scroll = inspect_overlay_scroll.saturating_sub(1);
+                        } else {
+                            let previous = match table_state.selected() {
+                                Some(selected) => {
+                                    if selected == 0 {
+                                        devices.len() - 1
+                                    } else {
+                                        selected - 1
+                                    }
                                 }
-                            }
-                            None => 0,
-                        };
-                        table_state.select(Some(previous));
+                                None => 0,
+                            };
+                            table_state.select(Some(previous));
+                        }
                     }
                     _ => {}
                 }

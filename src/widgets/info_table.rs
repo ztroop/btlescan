@@ -7,7 +7,7 @@ use ratatui::{
 /// Creates a table with information about the application and the user input.
 pub fn info_table(signal: bool) -> Table<'static> {
     let info_rows = vec![Row::new(vec![
-        "[esc → quit program]",
+        "[q → exit]",
         "[up/down → navigate]",
         "[enter → open/close]",
         if signal {
@@ -20,7 +20,7 @@ pub fn info_table(signal: bool) -> Table<'static> {
     let table = Table::new(
         info_rows,
         [
-            Constraint::Length(20),
+            Constraint::Length(10),
             Constraint::Length(20),
             Constraint::Length(20),
             Constraint::Length(20),
