@@ -17,7 +17,7 @@ pub fn detail_table(selected_device: &DeviceInfo) -> Table {
             ]),
             Row::new(vec!["Services:".to_owned(), services_binding]),
             Row::new(vec![
-                "Company Code Identifier:".to_owned(),
+                "Company Code ID:".to_owned(),
                 manufacturer_data.company_code,
             ]),
             Row::new(vec![
@@ -25,7 +25,7 @@ pub fn detail_table(selected_device: &DeviceInfo) -> Table {
                 manufacturer_data.data,
             ]),
         ],
-        [Constraint::Length(30), Constraint::Length(70)],
+        [Constraint::Length(20), Constraint::Length(80)],
     )
     .block(
         Block::default()

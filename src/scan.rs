@@ -7,7 +7,9 @@ use futures::StreamExt;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 
 /// Scans for Bluetooth devices and sends the information to the provided `mpsc::Sender`.
 /// The scan can be paused by setting the `pause_signal` to `true`.
@@ -64,7 +66,8 @@ pub async fn bluetooth_scan(
 pub async fn get_characteristics(
     peripheral: &btleplug::platform::Peripheral,
 ) -> Result<Vec<Characteristic>, Box<dyn Error>> {
-    peripheral.connect().await?;
+    let duration = Duration::from_secs(10);
+    timeout(duration, peripheral.connect()).await??;
 
     let characteristics = peripheral.characteristics();
     let mut result = Vec::new();
@@ -77,6 +80,7 @@ pub async fn get_characteristics(
                 .into_iter()
                 .map(|d| d.uuid)
                 .collect(),
+            service: characteristic.service_uuid,
         });
     }
     Ok(result)

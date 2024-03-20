@@ -74,7 +74,7 @@ pub async fn viewer<B: Backend>(
             // Draw the inspect overlay
             if inspect_view {
                 let inspect_overlay = inspect_overlay(&selected_characteristics);
-                let area = centered_rect(60, 60, f.size());
+                let area = centered_rect(80, 60, f.size());
                 f.render_widget(Clear, area);
                 f.render_widget(inspect_overlay, area);
             }

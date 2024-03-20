@@ -61,6 +61,7 @@ pub struct Characteristic {
     pub uuid: Uuid,
     pub properties: CharPropFlags,
     pub descriptors: Vec<Uuid>,
+    pub service: Uuid,
 }
 
 /// A struct to hold the information of a GATT Descriptor.
