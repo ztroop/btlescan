@@ -30,6 +30,14 @@ git clone git@github.com:ztroop/btlescan.git && cd ./btlescan
 cargo install --path .
 ```
 
+### Arch Linux (AUR)
+
+You can install `btlescan` from the [AUR](https://aur.archlinux.org/packages/btlescan) with using an [AUR helper](https://wiki.archlinux.org/title/AUR_helpers).
+
+```shell
+paru -S btlescan
+```
+
 ## Alternatives
 
 If you're looking to manage or pair Bluetooth devices, check out [bluetui](https://github.com/pythops/bluetui)!
