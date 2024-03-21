@@ -132,7 +132,7 @@ pub async fn viewer<B: Backend>(
                             }
                         }
                     }
-                    KeyCode::Down => {
+                    KeyCode::Down | KeyCode::Char('j') => {
                         if inspect_view {
                             inspect_overlay_scroll += 1;
                         } else {
@@ -149,7 +149,7 @@ pub async fn viewer<B: Backend>(
                             table_state.select(Some(next));
                         }
                     }
-                    KeyCode::Up => {
+                    KeyCode::Up | KeyCode::Char('k') => {
                         if inspect_view {
                             inspect_overlay_scroll = inspect_overlay_scroll.saturating_sub(1);
                         } else {
