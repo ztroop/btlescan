@@ -74,7 +74,7 @@ pub async fn viewer<B: Backend>(
 
             // Draw the inspect overlay
             if inspect_view {
-                let area = centered_rect(80, 60, f.size());
+                let area = centered_rect(60, 60, f.size());
                 let inspect_overlay = inspect_overlay(
                     &selected_characteristics,
                     inspect_overlay_scroll,
