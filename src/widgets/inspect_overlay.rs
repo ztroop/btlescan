@@ -46,14 +46,14 @@ pub fn inspect_overlay(
             );
 
             rows.push(Row::new(vec![format!(
-                "  → Characteristic: {}",
+                "  ↳ Characteristic: {}",
                 characteristic.uuid.to_string()
             )]));
-            rows.push(Row::new(vec![format!("    → Properties: {}", properties)]));
+            rows.push(Row::new(vec![format!("    ↳ Properties: {}", properties)]));
 
             for descriptor in characteristic.descriptors.iter() {
                 rows.push(Row::new(vec![format!(
-                    "    → Descriptor: {}",
+                    "    ↳ Descriptor: {}",
                     descriptor.to_string()
                 )]));
             }
