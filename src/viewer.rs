@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::scan::get_characteristics;
-use crate::structs::{Characteristic, DeviceInfo};
+use crate::structs::{App, DeviceInfo};
 use crate::utils::centered_rect;
 use crate::widgets::detail_table::detail_table;
 use crate::widgets::device_table::device_table;
@@ -29,19 +29,23 @@ pub async fn viewer<B: Backend>(
     mut rx: mpsc::Receiver<Vec<DeviceInfo>>,
     pause_signal: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut table_state = TableState::default();
-    table_state.select(Some(0));
-    let mut devices = Vec::<DeviceInfo>::new();
-    let mut inspect_view = false;
-    let mut inspect_overlay_scroll: usize = 0;
-    let mut selected_characteristics: Vec<Characteristic> = Vec::new();
-
-    let mut error_view = false;
-    let mut error_message = String::new();
+    let mut app = App {
+        table_state: TableState::default(),
+        devices: Vec::<DeviceInfo>::new(),
+        inspect_view: false,
+        inspect_overlay_scroll: 0,
+        selected_characteristics: Vec::new(),
+        frame_count: 0,
+        is_loading: false,
+        error_view: false,
+        error_message: String::new(),
+    };
+    app.table_state.select(Some(0));
 
     loop {
         // Draw UI
         terminal.draw(|f| {
+            app.frame_count = f.count();
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
@@ -56,28 +60,34 @@ pub async fn viewer<B: Backend>(
                 .split(f.size());
 
             let device_binding = &DeviceInfo::default();
-            let selected_device = devices
-                .get(table_state.selected().unwrap_or(0))
+            let selected_device = app
+                .devices
+                .get(app.table_state.selected().unwrap_or(0))
                 .unwrap_or(device_binding);
 
             // Draw the device table
-            let device_table = device_table(table_state.selected(), &devices);
-            f.render_stateful_widget(device_table, chunks[0], &mut table_state);
+            let device_table = device_table(app.table_state.selected(), &app.devices);
+            f.render_stateful_widget(device_table, chunks[0], &mut app.table_state);
 
             // Draw the detail table
             let detail_table = detail_table(selected_device);
             f.render_widget(detail_table, chunks[1]);
 
             // Draw the info table
-            let info_table = info_table(pause_signal.load(Ordering::SeqCst));
+            app.frame_count += 1;
+            let info_table = info_table(
+                pause_signal.load(Ordering::SeqCst),
+                &app.is_loading,
+                &app.frame_count,
+            );
             f.render_widget(info_table, chunks[2]);
 
             // Draw the inspect overlay
-            if inspect_view {
+            if app.inspect_view {
                 let area = centered_rect(60, 60, f.size());
                 let inspect_overlay = inspect_overlay(
-                    &selected_characteristics,
-                    inspect_overlay_scroll,
+                    &app.selected_characteristics,
+                    app.inspect_overlay_scroll,
                     area.height,
                 );
                 f.render_widget(Clear, area);
@@ -85,8 +95,8 @@ pub async fn viewer<B: Backend>(
             }
 
             // Draw the error overlay
-            if error_view {
-                let error_message_clone = error_message.clone();
+            if app.error_view {
+                let error_message_clone = app.error_message.clone();
                 let area = centered_rect(60, 10, f.size());
                 let error_block = Paragraph::new(Span::from(error_message_clone))
                     .alignment(Alignment::Center)
@@ -108,37 +118,41 @@ pub async fn viewer<B: Backend>(
                         pause_signal.store(!current_state, Ordering::SeqCst);
                     }
                     KeyCode::Enter => {
-                        if error_view {
-                            error_view = false;
-                        } else if inspect_view {
-                            inspect_view = false;
+                        if app.error_view {
+                            app.error_view = false;
+                        } else if app.inspect_view {
+                            app.inspect_view = false;
                         } else {
+                            app.is_loading = true;
                             let device_binding = &DeviceInfo::default();
-                            let selected_device = devices
-                                .get(table_state.selected().unwrap_or(0))
+                            let selected_device = app
+                                .devices
+                                .get(app.table_state.selected().unwrap_or(0))
                                 .unwrap_or(device_binding);
                             pause_signal.store(true, Ordering::SeqCst);
                             match get_characteristics(&selected_device.device.clone().unwrap())
                                 .await
                             {
                                 Ok(characteristics) => {
-                                    selected_characteristics = characteristics;
-                                    inspect_view = !inspect_view;
+                                    app.selected_characteristics = characteristics;
+                                    app.inspect_view = !app.inspect_view;
                                 }
                                 Err(e) => {
-                                    error_message = format!("Error getting characteristics: {}", e);
-                                    error_view = true;
+                                    app.error_message =
+                                        format!("Error getting characteristics: {}", e);
+                                    app.error_view = true;
                                 }
                             }
+                            app.is_loading = false;
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        if inspect_view {
-                            inspect_overlay_scroll += 1;
+                        if app.inspect_view {
+                            app.inspect_overlay_scroll += 1;
                         } else {
-                            let next = match table_state.selected() {
+                            let next = match app.table_state.selected() {
                                 Some(selected) => {
-                                    if selected >= devices.len() - 1 {
+                                    if selected >= app.devices.len() - 1 {
                                         0
                                     } else {
                                         selected + 1
@@ -146,24 +160,25 @@ pub async fn viewer<B: Backend>(
                                 }
                                 None => 0,
                             };
-                            table_state.select(Some(next));
+                            app.table_state.select(Some(next));
                         }
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        if inspect_view {
-                            inspect_overlay_scroll = inspect_overlay_scroll.saturating_sub(1);
+                        if app.inspect_view {
+                            app.inspect_overlay_scroll =
+                                app.inspect_overlay_scroll.saturating_sub(1);
                         } else {
-                            let previous = match table_state.selected() {
+                            let previous = match app.table_state.selected() {
                                 Some(selected) => {
                                     if selected == 0 {
-                                        devices.len() - 1
+                                        app.devices.len() - 1
                                     } else {
                                         selected - 1
                                     }
                                 }
                                 None => 0,
                             };
-                            table_state.select(Some(previous));
+                            app.table_state.select(Some(previous));
                         }
                     }
                     _ => {}
@@ -173,9 +188,9 @@ pub async fn viewer<B: Backend>(
 
         // Check for new devices
         if let Ok(new_devices) = rx.try_recv() {
-            devices = new_devices;
-            if table_state.selected().is_none() {
-                table_state.select(Some(0));
+            app.devices = new_devices;
+            if app.table_state.selected().is_none() {
+                app.table_state.select(Some(0));
             }
         }
     }
