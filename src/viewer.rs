@@ -2,19 +2,17 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::Backend;
 use ratatui::layout::Alignment;
 use ratatui::text::Span;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, TableState};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     Terminal,
 };
 use std::error::Error;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tokio::sync::mpsc;
 
-use crate::scan::get_characteristics;
-use crate::structs::{App, DeviceInfo};
+use crate::app::{App, DeviceData};
+use crate::structs::DeviceInfo;
 use crate::utils::centered_rect;
 use crate::widgets::detail_table::detail_table;
 use crate::widgets::device_table::device_table;
@@ -26,20 +24,8 @@ use crate::widgets::inspect_overlay::inspect_overlay;
 /// The detected devices are received through the provided `mpsc::Receiver`.
 pub async fn viewer<B: Backend>(
     terminal: &mut Terminal<B>,
-    mut rx: mpsc::Receiver<Vec<DeviceInfo>>,
-    pause_signal: Arc<AtomicBool>,
+    app: &mut App,
 ) -> Result<(), Box<dyn Error>> {
-    let mut app = App {
-        table_state: TableState::default(),
-        devices: Vec::<DeviceInfo>::new(),
-        inspect_view: false,
-        inspect_overlay_scroll: 0,
-        selected_characteristics: Vec::new(),
-        frame_count: 0,
-        is_loading: false,
-        error_view: false,
-        error_message: String::new(),
-    };
     app.table_state.select(Some(0));
 
     loop {
@@ -75,8 +61,8 @@ pub async fn viewer<B: Backend>(
 
             // Draw the info table
             app.frame_count += 1;
-            let info_table = info_table(
-                pause_signal.load(Ordering::SeqCst),
+            let info_table: ratatui::widgets::Table<'_> = info_table(
+                app.pause_status.load(Ordering::SeqCst),
                 &app.is_loading,
                 &app.frame_count,
             );
@@ -114,8 +100,8 @@ pub async fn viewer<B: Backend>(
                         break;
                     }
                     KeyCode::Char('s') => {
-                        let current_state = pause_signal.load(Ordering::SeqCst);
-                        pause_signal.store(!current_state, Ordering::SeqCst);
+                        let current_state = app.pause_status.load(Ordering::SeqCst);
+                        app.pause_status.store(!current_state, Ordering::SeqCst);
                     }
                     KeyCode::Enter => {
                         if app.error_view {
@@ -124,32 +110,13 @@ pub async fn viewer<B: Backend>(
                             app.inspect_view = false;
                         } else {
                             app.is_loading = true;
-                            let device_binding = &DeviceInfo::default();
-                            let selected_device = app
-                                .devices
-                                .get(app.table_state.selected().unwrap_or(0))
-                                .unwrap_or(device_binding);
-                            pause_signal.store(true, Ordering::SeqCst);
-                            match get_characteristics(&selected_device.device.clone().unwrap())
-                                .await
-                            {
-                                Ok(characteristics) => {
-                                    app.selected_characteristics = characteristics;
-                                    app.inspect_view = !app.inspect_view;
-                                }
-                                Err(e) => {
-                                    app.error_message =
-                                        format!("Error getting characteristics: {}", e);
-                                    app.error_view = true;
-                                }
-                            }
-                            app.is_loading = false;
+                            app.connect().await;
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         if app.inspect_view {
                             app.inspect_overlay_scroll += 1;
-                        } else {
+                        } else if !app.devices.is_empty() {
                             let next = match app.table_state.selected() {
                                 Some(selected) => {
                                     if selected >= app.devices.len() - 1 {
@@ -186,9 +153,22 @@ pub async fn viewer<B: Backend>(
             }
         }
 
-        // Check for new devices
-        if let Ok(new_devices) = rx.try_recv() {
-            app.devices = new_devices;
+        // Check for updates
+        if let Ok(new_device) = app.rx.try_recv() {
+            match new_device {
+                DeviceData::DeviceInfo(device) => app.devices.push(device),
+                DeviceData::Characteristics(characteristics) => {
+                    app.selected_characteristics = characteristics;
+                    app.inspect_view = true;
+                    app.is_loading = false;
+                }
+                DeviceData::Error(error) => {
+                    app.error_message = error;
+                    app.error_view = true;
+                    app.is_loading = false;
+                }
+            }
+
             if app.table_state.selected().is_none() {
                 app.table_state.select(Some(0));
             }

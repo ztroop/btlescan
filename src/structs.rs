@@ -1,20 +1,7 @@
 use std::collections::HashMap;
 
 use btleplug::api::CharPropFlags;
-use ratatui::widgets::TableState;
 use uuid::Uuid;
-
-pub struct App {
-    pub table_state: TableState,
-    pub devices: Vec<DeviceInfo>,
-    pub inspect_view: bool,
-    pub inspect_overlay_scroll: usize,
-    pub selected_characteristics: Vec<Characteristic>,
-    pub frame_count: usize,
-    pub is_loading: bool,
-    pub error_view: bool,
-    pub error_message: String,
-}
 
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
