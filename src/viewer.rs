@@ -103,6 +103,12 @@ pub async fn viewer<B: Backend>(
                         let current_state = app.pause_status.load(Ordering::SeqCst);
                         app.pause_status.store(!current_state, Ordering::SeqCst);
                     }
+                    KeyCode::Char('c') => {
+                        let _ = app.get_devices_csv();
+                        app.error_message =
+                            "Devices exported to a CSV file in the current directory.".to_string();
+                        app.error_view = true;
+                    }
                     KeyCode::Enter => {
                         if app.error_view {
                             app.error_view = false;

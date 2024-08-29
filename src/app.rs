@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    error::Error,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use ratatui::widgets::TableState;
@@ -8,7 +11,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::{
     scan::{bluetooth_scan, get_characteristics},
-    structs::{Characteristic, DeviceInfo},
+    structs::{Characteristic, DeviceCsv, DeviceInfo},
 };
 
 pub enum DeviceData {
@@ -18,6 +21,7 @@ pub enum DeviceData {
     Error(String),
 }
 
+#[allow(dead_code)]
 pub struct App {
     pub rx: UnboundedReceiver<DeviceData>,
     pub tx: UnboundedSender<DeviceData>,
@@ -72,5 +76,24 @@ impl App {
         let tx_clone = self.tx.clone();
 
         tokio::spawn(async move { get_characteristics(tx_clone, device).await });
+    }
+
+    pub fn get_devices_csv(&self) -> Result<(), Box<dyn Error>> {
+        let now = chrono::Local::now();
+        let timestamp = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+        let file_path = format!("btlescan_{}.csv", timestamp);
+        let file = std::fs::File::create(file_path).expect("Unable to create file");
+        let mut wtr = csv::Writer::from_writer(file);
+        for device in &self.devices {
+            wtr.serialize(DeviceCsv {
+                id: device.id.clone(),
+                name: device.name.clone(),
+                tx_power: device.tx_power.clone(),
+                address: device.address.clone(),
+                rssi: device.rssi.clone(),
+            })?;
+        }
+        wtr.flush()?;
+        Ok(())
     }
 }

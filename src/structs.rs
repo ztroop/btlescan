@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 pub struct DeviceInfo {
     pub id: String,
     pub name: String,
@@ -14,6 +15,7 @@ pub struct DeviceInfo {
     pub manufacturer_data: HashMap<u16, Vec<u8>>,
     pub services: Vec<Uuid>,
     pub detected_at: String,
+
     pub service_data: HashMap<Uuid, Vec<u8>>,
     pub device: Option<btleplug::platform::Peripheral>,
 }
@@ -68,4 +70,14 @@ pub struct Characteristic {
 pub struct ManufacturerData {
     pub company_code: String,
     pub data: String,
+}
+
+/// A struct to hold data for a CSV file.
+#[derive(serde::Serialize)]
+pub struct DeviceCsv {
+    pub id: String,
+    pub name: String,
+    pub tx_power: String,
+    pub address: String,
+    pub rssi: String,
 }
