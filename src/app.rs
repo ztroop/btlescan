@@ -78,7 +78,7 @@ impl App {
         tokio::spawn(async move { get_characteristics(tx_clone, device).await });
     }
 
-    pub fn get_devices_csv(&self) -> Result<(), Box<dyn Error>> {
+    pub fn get_devices_csv(&self) -> Result<String, Box<dyn Error>> {
         let now = chrono::Local::now();
         let timestamp = now.format("%Y-%m-%d_%H-%M-%S").to_string();
         let file_path = format!("btlescan_{}.csv", timestamp);
@@ -94,6 +94,6 @@ impl App {
             })?;
         }
         wtr.flush()?;
-        Ok(())
+        Ok("Devices exported to a CSV file in the current directory.".to_string())
     }
 }

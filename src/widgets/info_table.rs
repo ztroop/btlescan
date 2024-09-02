@@ -9,7 +9,7 @@ pub fn info_table(signal: bool, is_loading: &bool, frame_count: &usize) -> Table
     let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let index = frame_count % spinner.len();
     let info_text = format!(
-        "[q → exit] [c → csv] [up/down → navigate] [enter → open/close] {}",
+        "[q → exit] [e → export csv] [up/down → navigate] [enter → open/close] {}",
         if *is_loading {
             format!("[loading... {}]", spinner[index])
         } else if signal {

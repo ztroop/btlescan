@@ -21,7 +21,7 @@ This tool provides a cross-platform CLI with an interactive way to view Bluetoot
     - **Up/Down Arrows**: Scroll through the list of devices.
     - **Q**: Quit the application.
     - **S**: Toggle scanning.
-    - **C**: Export CSV data to current directory.
+    - **E**: Export CSV data to current directory.
     - **ENTER**: Open or close widget.
 
 ## Installation
