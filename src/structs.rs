@@ -3,6 +3,104 @@ use std::collections::HashMap;
 use btleplug::api::CharPropFlags;
 use uuid::Uuid;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum AppMode {
+    Client,
+    Server,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FocusPanel {
+    DeviceList,
+    Characteristics,
+    ReadWrite,
+    MessageLog,
+}
+
+impl FocusPanel {
+    pub fn next(&self) -> Self {
+        match self {
+            FocusPanel::DeviceList => FocusPanel::Characteristics,
+            FocusPanel::Characteristics => FocusPanel::ReadWrite,
+            FocusPanel::ReadWrite => FocusPanel::MessageLog,
+            FocusPanel::MessageLog => FocusPanel::DeviceList,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum InputMode {
+    Normal,
+    Editing,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DataFormat {
+    Text,
+    Hex,
+}
+
+impl DataFormat {
+    pub fn toggle(&self) -> Self {
+        match self {
+            DataFormat::Text => DataFormat::Hex,
+            DataFormat::Hex => DataFormat::Text,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            DataFormat::Text => "Text",
+            DataFormat::Hex => "Hex",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LogDirection {
+    Sent,
+    Received,
+    Info,
+    Error,
+}
+
+impl LogDirection {
+    pub fn symbol(&self) -> &str {
+        match self {
+            LogDirection::Sent => "→",
+            LogDirection::Received => "←",
+            LogDirection::Info => "ℹ",
+            LogDirection::Error => "✗",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub direction: LogDirection,
+    pub message: String,
+}
+
+impl LogEntry {
+    pub fn new(direction: LogDirection, message: String) -> Self {
+        Self {
+            timestamp: chrono::Local::now().format("%H:%M:%S.%3f").to_string(),
+            direction,
+            message,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_timestamp(timestamp: &str, direction: LogDirection, message: String) -> Self {
+        Self {
+            timestamp: timestamp.to_string(),
+            direction,
+            message,
+        }
+    }
+}
+
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
 #[allow(dead_code)]
@@ -15,13 +113,11 @@ pub struct DeviceInfo {
     pub manufacturer_data: HashMap<u16, Vec<u8>>,
     pub services: Vec<Uuid>,
     pub detected_at: String,
-
     pub service_data: HashMap<Uuid, Vec<u8>>,
     pub device: Option<btleplug::platform::Peripheral>,
 }
 
 impl DeviceInfo {
-    /// Creates a new `DeviceInfo` with the provided information.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -49,7 +145,6 @@ impl DeviceInfo {
     }
 
     pub fn get_id(&self) -> String {
-        // Returns the `uuid` or `address` of the device if MacOS or Linux.
         if cfg!(target_os = "macos") {
             self.id.clone()
         } else {
@@ -59,11 +154,14 @@ impl DeviceInfo {
 }
 
 /// A struct to hold the information of a GATT Characteristic.
+#[derive(Clone)]
+#[allow(dead_code)]
 pub struct Characteristic {
     pub uuid: Uuid,
     pub properties: CharPropFlags,
     pub descriptors: Vec<Uuid>,
     pub service: Uuid,
+    pub handle: Option<btleplug::api::Characteristic>,
 }
 
 /// A struct to hold the information of a GATT Descriptor.
@@ -80,4 +178,65 @@ pub struct DeviceCsv {
     pub tx_power: String,
     pub address: String,
     pub rssi: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_focus_panel_cycle() {
+        let panel = FocusPanel::DeviceList;
+        assert_eq!(panel.next(), FocusPanel::Characteristics);
+        assert_eq!(panel.next().next(), FocusPanel::ReadWrite);
+        assert_eq!(panel.next().next().next(), FocusPanel::MessageLog);
+        assert_eq!(panel.next().next().next().next(), FocusPanel::DeviceList);
+    }
+
+    #[test]
+    fn test_data_format_toggle() {
+        let fmt = DataFormat::Text;
+        assert_eq!(fmt.toggle(), DataFormat::Hex);
+        assert_eq!(fmt.toggle().toggle(), DataFormat::Text);
+    }
+
+    #[test]
+    fn test_data_format_label() {
+        assert_eq!(DataFormat::Text.label(), "Text");
+        assert_eq!(DataFormat::Hex.label(), "Hex");
+    }
+
+    #[test]
+    fn test_log_direction_symbol() {
+        assert_eq!(LogDirection::Sent.symbol(), "→");
+        assert_eq!(LogDirection::Received.symbol(), "←");
+        assert_eq!(LogDirection::Info.symbol(), "ℹ");
+        assert_eq!(LogDirection::Error.symbol(), "✗");
+    }
+
+    #[test]
+    fn test_log_entry_creation() {
+        let entry = LogEntry::with_timestamp("12:00:00.000", LogDirection::Info, "test".into());
+        assert_eq!(entry.timestamp, "12:00:00.000");
+        assert_eq!(entry.direction, LogDirection::Info);
+        assert_eq!(entry.message, "test");
+    }
+
+    #[test]
+    fn test_device_info_default() {
+        let device = DeviceInfo::default();
+        assert_eq!(device.name, "");
+        assert_eq!(device.rssi, "");
+        assert!(device.device.is_none());
+    }
+
+    #[test]
+    fn test_app_mode_variants() {
+        assert_ne!(AppMode::Client, AppMode::Server);
+    }
+
+    #[test]
+    fn test_input_mode_variants() {
+        assert_ne!(InputMode::Normal, InputMode::Editing);
+    }
 }
