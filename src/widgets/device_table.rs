@@ -6,15 +6,22 @@ use ratatui::{
 
 use crate::structs::DeviceInfo;
 
-/// Creates a table with the detected BTLE devices.
-pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo]) -> Table {
+pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo], focused: bool) -> Table<'_> {
+    let border_color = if focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
+
     let selected_style = Style::default().add_modifier(Modifier::REVERSED);
     let rows: Vec<Row> = devices
         .iter()
         .enumerate()
         .map(|(i, device)| {
-            let style = if selected == Some(i) {
+            let style = if selected == Some(i) && focused {
                 selected_style
+            } else if selected == Some(i) {
+                Style::default().fg(Color::Cyan)
             } else {
                 Style::default()
             };
@@ -28,7 +35,7 @@ pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo]) -> Table {
         })
         .collect();
 
-    let table = Table::new(
+    Table::new(
         rows,
         [
             Constraint::Length(40),
@@ -44,9 +51,8 @@ pub fn device_table(selected: Option<usize>, devices: &[DeviceInfo]) -> Table {
     .block(
         Block::default()
             .title("Detected Devices")
-            .borders(Borders::ALL),
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color)),
     )
-    .highlight_style(selected_style);
-
-    table
+    .row_highlight_style(selected_style)
 }

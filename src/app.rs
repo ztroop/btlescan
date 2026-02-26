@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     error::Error,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -8,34 +9,78 @@ use std::{
 
 use ratatui::widgets::TableState;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use uuid::Uuid;
 
 use crate::{
-    scan::{bluetooth_scan, get_characteristics},
-    structs::{Characteristic, DeviceCsv, DeviceInfo},
+    scan::{
+        bluetooth_scan, connect_device, disconnect_device, read_characteristic_value,
+        subscribe_to_notifications, unsubscribe_from_notifications, write_characteristic_value,
+    },
+    structs::{
+        AppMode, Characteristic, DataFormat, DeviceCsv, DeviceInfo, FocusPanel, InputMode,
+        LogDirection, LogEntry,
+    },
+    utils::{bytes_to_hex, hex_to_bytes},
 };
 
 pub enum DeviceData {
     DeviceInfo(DeviceInfo),
-    #[allow(dead_code)]
     Characteristics(Vec<Characteristic>),
+    CharacteristicValue { uuid: Uuid, value: Vec<u8> },
+    Notification { uuid: Uuid, value: Vec<u8> },
+    WriteComplete { uuid: Uuid },
+    SubscribeComplete { uuid: Uuid },
+    UnsubscribeComplete { uuid: Uuid },
     Error(String),
+    Info(String),
 }
 
-#[allow(dead_code)]
 pub struct App {
     pub rx: UnboundedReceiver<DeviceData>,
     pub tx: UnboundedSender<DeviceData>,
+
+    #[allow(dead_code)]
     pub loading_status: Arc<AtomicBool>,
     pub pause_status: Arc<AtomicBool>,
+
+    // Mode and navigation
+    pub mode: AppMode,
+    pub focus: FocusPanel,
+    pub input_mode: InputMode,
+    pub data_format: DataFormat,
+
+    // Device list
     pub table_state: TableState,
     pub devices: Vec<DeviceInfo>,
-    pub inspect_view: bool,
-    pub inspect_overlay_scroll: usize,
+
+    // Connection
+    pub connected_device: Option<Arc<DeviceInfo>>,
+    pub is_connected: bool,
+
+    // Characteristics
     pub selected_characteristics: Vec<Characteristic>,
+    pub char_table_state: TableState,
+    pub char_values: HashMap<Uuid, Vec<u8>>,
+    pub subscribed_chars: HashSet<Uuid>,
+
+    // Input
+    pub input_buffer: String,
+    pub cursor_position: usize,
+
+    // Message log
+    pub message_log: Vec<LogEntry>,
+    pub log_scroll: usize,
+
+    // Server
+    pub server_name: String,
+    pub is_advertising: bool,
+
+    // UI state
     pub frame_count: usize,
     pub is_loading: bool,
     pub error_view: bool,
     pub error_message: String,
+    pub should_quit: bool,
 }
 
 impl App {
@@ -46,15 +91,37 @@ impl App {
             rx,
             loading_status: Arc::new(AtomicBool::default()),
             pause_status: Arc::new(AtomicBool::default()),
+
+            mode: AppMode::Client,
+            focus: FocusPanel::DeviceList,
+            input_mode: InputMode::Normal,
+            data_format: DataFormat::Hex,
+
             table_state: TableState::default(),
             devices: Vec::new(),
-            inspect_view: false,
-            inspect_overlay_scroll: 0,
+
+            connected_device: None,
+            is_connected: false,
+
             selected_characteristics: Vec::new(),
+            char_table_state: TableState::default(),
+            char_values: HashMap::new(),
+            subscribed_chars: HashSet::new(),
+
+            input_buffer: String::new(),
+            cursor_position: 0,
+
+            message_log: Vec::new(),
+            log_scroll: 0,
+
+            server_name: "btlescan".to_string(),
+            is_advertising: false,
+
             frame_count: 0,
             is_loading: false,
             error_view: false,
             error_message: String::new(),
+            should_quit: false,
         }
     }
 
@@ -68,14 +135,149 @@ impl App {
         let selected_device = self
             .devices
             .get(self.table_state.selected().unwrap_or(0))
-            .unwrap();
+            .cloned();
 
-        self.pause_status.store(true, Ordering::SeqCst);
+        if let Some(device) = selected_device {
+            self.pause_status.store(true, Ordering::SeqCst);
+            self.is_loading = true;
+            let device = Arc::new(device);
+            self.connected_device = Some(Arc::clone(&device));
+            let tx_clone = self.tx.clone();
+            tokio::spawn(async move { connect_device(tx_clone, device).await });
+        }
+    }
 
-        let device = Arc::new(selected_device.clone());
-        let tx_clone = self.tx.clone();
+    pub async fn disconnect(&mut self) {
+        if let Some(device) = &self.connected_device {
+            let device = Arc::clone(device);
+            let tx_clone = self.tx.clone();
+            tokio::spawn(async move { disconnect_device(tx_clone, device).await });
+        }
+        self.is_connected = false;
+        self.connected_device = None;
+        self.selected_characteristics.clear();
+        self.char_table_state = TableState::default();
+        self.char_values.clear();
+        self.subscribed_chars.clear();
+        self.input_buffer.clear();
+        self.cursor_position = 0;
+        self.pause_status.store(false, Ordering::SeqCst);
+        self.add_log(LogDirection::Info, "Disconnected from device".into());
+    }
 
-        tokio::spawn(async move { get_characteristics(tx_clone, device).await });
+    pub fn read_selected_characteristic(&self) {
+        let char_opt = self.selected_characteristic();
+        let peripheral = self
+            .connected_device
+            .as_ref()
+            .and_then(|d| d.device.clone());
+
+        if let (Some(ch), Some(device)) = (char_opt, peripheral) {
+            if let Some(handle) = &ch.handle {
+                let tx = self.tx.clone();
+                let handle = handle.clone();
+                tokio::spawn(async move { read_characteristic_value(tx, device, handle).await });
+            }
+        }
+    }
+
+    pub fn write_selected_characteristic(&mut self) -> Result<(), String> {
+        let data = self.parse_input()?;
+        let char_opt = self.selected_characteristic().cloned();
+        let peripheral = self
+            .connected_device
+            .as_ref()
+            .and_then(|d| d.device.clone());
+
+        if let (Some(ch), Some(device)) = (char_opt, peripheral) {
+            if let Some(handle) = ch.handle {
+                let hex_str = bytes_to_hex(&data);
+                self.add_log(LogDirection::Sent, format!("{} ({})", hex_str, handle.uuid));
+                let tx = self.tx.clone();
+                let data_clone = data;
+                tokio::spawn(async move {
+                    write_characteristic_value(tx, device, handle, data_clone).await
+                });
+                self.input_buffer.clear();
+                self.cursor_position = 0;
+                Ok(())
+            } else {
+                Err("No handle for characteristic".into())
+            }
+        } else {
+            Err("No characteristic or device selected".into())
+        }
+    }
+
+    pub fn toggle_subscribe(&mut self) {
+        let char_opt = self.selected_characteristic().cloned();
+        let peripheral = self
+            .connected_device
+            .as_ref()
+            .and_then(|d| d.device.clone());
+
+        if let (Some(ch), Some(device)) = (char_opt, peripheral) {
+            if let Some(handle) = ch.handle {
+                let tx = self.tx.clone();
+                if self.subscribed_chars.contains(&ch.uuid) {
+                    tokio::spawn(async move {
+                        unsubscribe_from_notifications(tx, device, handle).await
+                    });
+                } else {
+                    tokio::spawn(
+                        async move { subscribe_to_notifications(tx, device, handle).await },
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn selected_characteristic(&self) -> Option<&Characteristic> {
+        let idx = self.char_table_state.selected()?;
+        self.selected_characteristics.get(idx)
+    }
+
+    pub fn add_log(&mut self, direction: LogDirection, message: String) {
+        self.message_log.push(LogEntry::new(direction, message));
+        self.log_scroll = self.message_log.len().saturating_sub(1);
+    }
+
+    pub fn cycle_focus(&mut self) {
+        self.focus = self.focus.next();
+    }
+
+    pub fn toggle_data_format(&mut self) {
+        self.data_format = self.data_format.toggle();
+    }
+
+    pub fn toggle_mode(&mut self) {
+        self.mode = match self.mode {
+            AppMode::Client => AppMode::Server,
+            AppMode::Server => AppMode::Client,
+        };
+    }
+
+    pub fn parse_input(&self) -> Result<Vec<u8>, String> {
+        match self.data_format {
+            DataFormat::Hex => hex_to_bytes(&self.input_buffer),
+            DataFormat::Text => Ok(self.input_buffer.as_bytes().to_vec()),
+        }
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.input_buffer.insert(self.cursor_position, c);
+        self.cursor_position += c.len_utf8();
+    }
+
+    pub fn delete_char(&mut self) {
+        if self.cursor_position > 0 {
+            let prev = self.input_buffer[..self.cursor_position]
+                .chars()
+                .last()
+                .map_or(0, |c| c.len_utf8());
+            self.cursor_position -= prev;
+            self.input_buffer.remove(self.cursor_position);
+        }
     }
 
     pub fn get_devices_csv(&self) -> Result<String, Box<dyn Error>> {
@@ -95,5 +297,129 @@ impl App {
         }
         wtr.flush()?;
         Ok("Devices exported to a CSV file in the current directory.".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_new_defaults() {
+        let app = App::new();
+        assert_eq!(app.mode, AppMode::Client);
+        assert_eq!(app.focus, FocusPanel::DeviceList);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.data_format, DataFormat::Hex);
+        assert!(!app.is_connected);
+        assert!(app.devices.is_empty());
+        assert!(app.selected_characteristics.is_empty());
+        assert!(app.message_log.is_empty());
+        assert_eq!(app.server_name, "btlescan");
+    }
+
+    #[test]
+    fn test_cycle_focus() {
+        let mut app = App::new();
+        assert_eq!(app.focus, FocusPanel::DeviceList);
+        app.cycle_focus();
+        assert_eq!(app.focus, FocusPanel::Characteristics);
+        app.cycle_focus();
+        assert_eq!(app.focus, FocusPanel::ReadWrite);
+        app.cycle_focus();
+        assert_eq!(app.focus, FocusPanel::MessageLog);
+        app.cycle_focus();
+        assert_eq!(app.focus, FocusPanel::DeviceList);
+    }
+
+    #[test]
+    fn test_toggle_mode() {
+        let mut app = App::new();
+        assert_eq!(app.mode, AppMode::Client);
+        app.toggle_mode();
+        assert_eq!(app.mode, AppMode::Server);
+        app.toggle_mode();
+        assert_eq!(app.mode, AppMode::Client);
+    }
+
+    #[test]
+    fn test_toggle_data_format() {
+        let mut app = App::new();
+        assert_eq!(app.data_format, DataFormat::Hex);
+        app.toggle_data_format();
+        assert_eq!(app.data_format, DataFormat::Text);
+        app.toggle_data_format();
+        assert_eq!(app.data_format, DataFormat::Hex);
+    }
+
+    #[test]
+    fn test_add_log() {
+        let mut app = App::new();
+        app.add_log(LogDirection::Info, "Test message".into());
+        assert_eq!(app.message_log.len(), 1);
+        assert_eq!(app.message_log[0].message, "Test message");
+        assert_eq!(app.message_log[0].direction, LogDirection::Info);
+    }
+
+    #[test]
+    fn test_insert_and_delete_char() {
+        let mut app = App::new();
+        app.insert_char('A');
+        app.insert_char('B');
+        app.insert_char('C');
+        assert_eq!(app.input_buffer, "ABC");
+        assert_eq!(app.cursor_position, 3);
+
+        app.delete_char();
+        assert_eq!(app.input_buffer, "AB");
+        assert_eq!(app.cursor_position, 2);
+
+        app.delete_char();
+        app.delete_char();
+        assert_eq!(app.input_buffer, "");
+        assert_eq!(app.cursor_position, 0);
+
+        // Deleting from empty should not panic
+        app.delete_char();
+        assert_eq!(app.input_buffer, "");
+    }
+
+    #[test]
+    fn test_parse_input_hex() {
+        let mut app = App::new();
+        app.data_format = DataFormat::Hex;
+        app.input_buffer = "00 50".to_string();
+        assert_eq!(app.parse_input().unwrap(), vec![0x00, 0x50]);
+    }
+
+    #[test]
+    fn test_parse_input_text() {
+        let mut app = App::new();
+        app.data_format = DataFormat::Text;
+        app.input_buffer = "Hi".to_string();
+        assert_eq!(app.parse_input().unwrap(), vec![0x48, 0x69]);
+    }
+
+    #[test]
+    fn test_parse_input_invalid_hex() {
+        let mut app = App::new();
+        app.data_format = DataFormat::Hex;
+        app.input_buffer = "ZZ".to_string();
+        assert!(app.parse_input().is_err());
+    }
+
+    #[test]
+    fn test_selected_characteristic_none() {
+        let app = App::new();
+        assert!(app.selected_characteristic().is_none());
+    }
+
+    #[test]
+    fn test_log_scroll_follows_latest() {
+        let mut app = App::new();
+        for i in 0..10 {
+            app.add_log(LogDirection::Info, format!("msg {}", i));
+        }
+        assert_eq!(app.log_scroll, 9);
     }
 }

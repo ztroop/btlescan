@@ -25,9 +25,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    terminal.clear()?;
+
     let mut app = app::App::new();
     app.scan().await;
-    viewer(&mut terminal, &mut app).await?;
+    let result = viewer(&mut terminal, &mut app).await;
 
     disable_raw_mode()?;
     execute!(
@@ -35,5 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         LeaveAlternateScreen,
         DisableMouseCapture
     )?;
-    Ok(())
+    terminal.show_cursor()?;
+
+    result
 }
