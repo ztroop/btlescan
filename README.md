@@ -2,27 +2,36 @@
 
 # btlescan
 
-## Summary
-
-This tool provides a cross-platform CLI with an interactive way to view Bluetooth Low Energy (BTLE) devices, showcasing their Address/UUID, Name, TX Power, and RSSI (Received Signal Strength Indicator) in a table format. It also provides functionality to inspect GATT information.
+A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecting GATT services and characteristics, and reading/writing characteristic values in real time.
 
 ![demo](./assets/demo.png)
 
 ## Features
 
-- Real-Time Discovery: Continuously scans for Bluetooth devices, updating the list in real-time as new devices appear or existing devices become unavailable.
-- Device Information: Displays detailed information about each detected Bluetooth device, including:
-    - **Address/UUID**: The unique address or UUID of the Bluetooth device.
-    - **Name**: The name of the Bluetooth device, if available.
-    - **TX Power**: The transmission power level, indicating the strength at which the device is broadcasting its signal.
-    - **RSSI**: Received Signal Strength Indicator, a measure of the power present in the received signal, indicating how close or far the device is.
-- Interactive UI: The terminal-based user interface allows users to scroll through the list of discovered devices, providing an easy way to browse and select devices of interest.
-- Keyboard Navigation: Supports simple keyboard controls for navigation:
-    - **Up/Down Arrows**: Scroll through the list of devices.
-    - **Q**: Quit the application.
-    - **S**: Toggle scanning.
-    - **E**: Export CSV data to current directory.
-    - **ENTER**: Open or close widget.
+- **Device Discovery** — Continuous scanning with live updates of address/UUID, name, TX power, and RSSI.
+- **GATT Inspection** — Connect to a device, discover services, and browse characteristics with their properties.
+- **Read / Write** — Read characteristic values or write data in hex or text format.
+- **Notifications** — Subscribe to characteristic notifications with a timestamped message log.
+- **Server Mode** — Framework for GATT server advertising (platform-specific backend required).
+- **CSV Export** — Export the device list to a CSV file.
+
+## Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `Tab` | Cycle focus between panels |
+| `↑/↓` or `j/k` | Navigate lists / scroll log |
+| `Enter` | Connect to selected device |
+| `d` | Disconnect |
+| `r` | Read selected characteristic |
+| `w` / `i` | Write — enter editing mode |
+| `n` | Toggle notification subscription |
+| `t` | Toggle hex / text input format |
+| `s` | Toggle scan pause/resume |
+| `e` | Export devices to CSV |
+| `m` | Switch client / server mode |
+| `Esc` | Cancel editing |
 
 ## Installation
 
@@ -33,9 +42,7 @@ cargo install --path .
 
 ### Arch Linux (AUR)
 
-You can install `btlescan` from the [AUR](https://aur.archlinux.org/packages/btlescan) with using an [AUR helper](https://wiki.archlinux.org/title/AUR_helpers).
-
-```shell
+```sh
 paru -S btlescan
 ```
 
