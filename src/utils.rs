@@ -53,7 +53,7 @@ pub fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
     if cleaned.is_empty() {
         return Ok(Vec::new());
     }
-    if cleaned.len() % 2 != 0 {
+    if !cleaned.len().is_multiple_of(2) {
         return Err("Hex string must have even number of characters".to_string());
     }
     (0..cleaned.len())

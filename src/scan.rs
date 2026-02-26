@@ -47,7 +47,7 @@ pub async fn bluetooth_scan(tx: mpsc::UnboundedSender<DeviceData>, pause_signal:
                     device.clone(),
                 );
 
-                let _ = tx.send(DeviceData::DeviceInfo(device));
+                let _ = tx.send(DeviceData::DeviceInfo(Box::new(device)));
             }
         }
     }

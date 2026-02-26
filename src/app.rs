@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub enum DeviceData {
-    DeviceInfo(DeviceInfo),
+    DeviceInfo(Box<DeviceInfo>),
     Characteristics(Vec<Characteristic>),
     CharacteristicValue { uuid: Uuid, value: Vec<u8> },
     Notification { uuid: Uuid, value: Vec<u8> },

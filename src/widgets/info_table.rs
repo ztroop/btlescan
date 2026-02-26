@@ -39,7 +39,7 @@ pub fn info_table(
                 parts.push("[e → export]");
             }
             if *is_loading {
-                parts.push(&"");
+                parts.push("");
                 let loading = format!("[loading... {}]", spinner[index]);
                 return make_table(&format!("{} {}", parts.join(" "), loading));
             }

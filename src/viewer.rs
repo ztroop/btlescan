@@ -279,9 +279,7 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
             app.connect().await;
         }
         KeyCode::Char('d') if app.is_connected => {
-            let selected = app
-                .devices
-                .get(app.table_state.selected().unwrap_or(0));
+            let selected = app.devices.get(app.table_state.selected().unwrap_or(0));
             let is_viewing_connected = selected
                 .zip(app.connected_device.as_deref())
                 .map(|(sel, conn)| sel.get_id() == conn.get_id())
@@ -426,7 +424,8 @@ fn handle_server_input(app: &mut App, key: KeyCode) {
 fn process_channel_messages(app: &mut App) {
     while let Ok(msg) = app.rx.try_recv() {
         match msg {
-            DeviceData::DeviceInfo(device) => {
+            DeviceData::DeviceInfo(boxed) => {
+                let device = *boxed;
                 app.devices.push(device);
                 if app.table_state.selected().is_none() {
                     app.table_state.select(Some(0));
