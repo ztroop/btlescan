@@ -8,7 +8,10 @@ use std::{
 };
 
 use ratatui::widgets::TableState;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -59,6 +62,8 @@ pub struct App {
     #[allow(dead_code)]
     pub loading_status: Arc<AtomicBool>,
     pub pause_status: Arc<AtomicBool>,
+    pub scan_shutdown: Option<oneshot::Sender<()>>,
+    pub scan_handle: Option<tokio::task::JoinHandle<()>>,
 
     // Mode and navigation
     pub mode: AppMode,
@@ -113,6 +118,8 @@ impl App {
             rx,
             loading_status: Arc::new(AtomicBool::default()),
             pause_status: Arc::new(AtomicBool::default()),
+            scan_shutdown: None,
+            scan_handle: None,
 
             mode: AppMode::Client,
             focus: FocusPanel::DeviceList,
@@ -153,9 +160,23 @@ impl App {
     }
 
     pub async fn scan(&mut self) {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        self.scan_shutdown = Some(shutdown_tx);
         let pause_signal_clone = Arc::clone(&self.pause_status);
         let tx_clone = self.tx.clone();
-        tokio::spawn(async move { bluetooth_scan(tx_clone, pause_signal_clone).await });
+        self.scan_handle = Some(tokio::spawn(async move {
+            bluetooth_scan(tx_clone, pause_signal_clone, shutdown_rx).await
+        }));
+    }
+
+    pub async fn stop_scan(&mut self) {
+        if let Some(tx) = self.scan_shutdown.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.scan_handle.take() {
+            let _ = handle.await;
+        }
+        self.pause_status.store(true, Ordering::SeqCst);
     }
 
     pub async fn connect(&mut self) {
@@ -279,10 +300,7 @@ impl App {
 
     pub fn toggle_mode(&mut self) {
         self.mode = match self.mode {
-            AppMode::Client => {
-                self.pause_status.store(true, Ordering::SeqCst);
-                AppMode::Server
-            }
+            AppMode::Client => AppMode::Server,
             AppMode::Server => AppMode::Client,
         };
     }

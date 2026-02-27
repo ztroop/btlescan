@@ -304,6 +304,7 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
             app.cycle_focus();
         }
         KeyCode::Char('m') => {
+            app.stop_scan().await;
             app.toggle_mode();
         }
         KeyCode::Char('s') if !app.is_connected => {
@@ -456,6 +457,7 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
                 app.stop_server().await;
             }
             app.toggle_mode();
+            app.scan().await;
         }
         KeyCode::Char('a') if !app.is_advertising => {
             app.start_server().await;

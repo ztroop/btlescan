@@ -11,7 +11,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-pub async fn bluetooth_scan(tx: mpsc::UnboundedSender<DeviceData>, pause_signal: Arc<AtomicBool>) {
+pub async fn bluetooth_scan(
+    tx: mpsc::UnboundedSender<DeviceData>,
+    pause_signal: Arc<AtomicBool>,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
+) {
     let manager = Manager::new().await.unwrap();
     let adapters = manager.adapters().await.unwrap();
     let central = adapters.into_iter().next().expect("No adapters found");
@@ -21,36 +25,71 @@ pub async fn bluetooth_scan(tx: mpsc::UnboundedSender<DeviceData>, pause_signal:
         .await
         .expect("Scanning failure");
     let mut events = central.events().await.unwrap();
+    let mut scanning = true;
 
-    while let Some(event) = events.next().await {
-        while pause_signal.load(Ordering::SeqCst) {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    loop {
+        if shutdown.try_recv().is_ok() {
+            if scanning {
+                let _ = central.stop_scan().await;
+            }
+            break;
         }
 
-        if let CentralEvent::DeviceDiscovered(id) = event {
-            if let Ok(device) = central.peripheral(&id).await {
-                let properties = device
-                    .properties()
-                    .await
-                    .unwrap()
-                    .unwrap_or(PeripheralProperties::default());
-
-                let device = DeviceInfo::new(
-                    device.id().to_string(),
-                    properties.local_name,
-                    properties.tx_power_level,
-                    properties.address.to_string(),
-                    properties.rssi,
-                    properties.manufacturer_data,
-                    properties.services,
-                    properties.service_data,
-                    device.clone(),
-                );
-
-                let _ = tx.send(DeviceData::DeviceInfo(Box::new(device)));
+        if pause_signal.load(Ordering::SeqCst) {
+            if scanning {
+                let _ = central.stop_scan().await;
+                scanning = false;
             }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+
+        if !scanning {
+            let _ = central.start_scan(ScanFilter::default()).await;
+            scanning = true;
+        }
+
+        tokio::select! {
+            _ = &mut shutdown => {
+                if scanning {
+                    let _ = central.stop_scan().await;
+                }
+                break;
+            }
+            event = events.next() => {
+                match event {
+                    Some(CentralEvent::DeviceDiscovered(id)) => {
+                        if let Ok(device) = central.peripheral(&id).await {
+                            let properties = device
+                                .properties()
+                                .await
+                                .unwrap()
+                                .unwrap_or(PeripheralProperties::default());
+
+                            let device = DeviceInfo::new(
+                                device.id().to_string(),
+                                properties.local_name,
+                                properties.tx_power_level,
+                                properties.address.to_string(),
+                                properties.rssi,
+                                properties.manufacturer_data,
+                                properties.services,
+                                properties.service_data,
+                                device.clone(),
+                            );
+
+                            let _ = tx.send(DeviceData::DeviceInfo(Box::new(device)));
+                        }
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(200)) => {}
         }
     }
+    // Manager, central, and events stream are dropped here,
+    // fully releasing the CBCentralManager.
 }
 
 /// Connects to a device, discovers services, retrieves characteristics,
