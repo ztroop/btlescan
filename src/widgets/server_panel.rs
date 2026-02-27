@@ -4,7 +4,8 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table},
 };
 
-use crate::structs::{InputMode, ServerField};
+use crate::structs::{DataFormat, InputMode, ServerField};
+use crate::utils::bytes_to_hex;
 
 #[allow(clippy::too_many_arguments)]
 pub fn server_panel<'a>(
@@ -16,6 +17,8 @@ pub fn server_panel<'a>(
     input_mode: &InputMode,
     input_buffer: &str,
     focused: bool,
+    current_value: &[u8],
+    data_format: &DataFormat,
 ) -> Table<'a> {
     let border_color = if focused {
         Color::Yellow
@@ -64,7 +67,48 @@ pub fn server_panel<'a>(
         rows.push(Row::new(vec![format!("{}:", field.label()), display_value]).style(style));
     }
 
-    if !is_advertising {
+    if is_advertising {
+        rows.push(Row::new(vec![
+            "Properties:".to_string(),
+            "Read, Write, Notify".to_string(),
+        ]));
+
+        let value_display = if current_value.is_empty() {
+            "—".to_string()
+        } else {
+            bytes_to_hex(current_value)
+        };
+        rows.push(Row::new(vec!["Value:".to_string(), value_display]));
+
+        rows.push(Row::new(vec![
+            "Format [t]:".to_string(),
+            data_format.label().to_string(),
+        ]));
+
+        let input_display = if *input_mode == InputMode::Editing {
+            format!("▸ {}_", input_buffer)
+        } else {
+            "Press 'w' to enter data".to_string()
+        };
+        let editing_color = if *input_mode == InputMode::Editing {
+            Color::Green
+        } else {
+            Color::White
+        };
+        rows.push(
+            Row::new(vec!["Input:".to_string(), input_display])
+                .style(Style::default().fg(editing_color)),
+        );
+
+        rows.push(Row::default());
+        rows.push(
+            Row::new(vec![
+                "".to_string(),
+                "[w → set value] [n → notify] [t → format] [x → stop]".to_string(),
+            ])
+            .style(Style::default().fg(Color::DarkGray)),
+        );
+    } else {
         rows.push(Row::default());
         rows.push(
             Row::new(vec![
@@ -98,6 +142,8 @@ mod tests {
             &InputMode::Normal,
             "",
             false,
+            &[],
+            &DataFormat::Hex,
         );
     }
 
@@ -112,11 +158,45 @@ mod tests {
             &InputMode::Normal,
             "",
             true,
+            &[0x00, 0x50],
+            &DataFormat::Hex,
         );
     }
 
     #[test]
-    fn test_server_panel_editing() {
+    fn test_server_panel_advertising_empty_value() {
+        let _table = server_panel(
+            "my-device",
+            "0000180d-0000-1000-8000-00805f9b34fb",
+            "00002a37-0000-1000-8000-00805f9b34fb",
+            true,
+            &ServerField::Name,
+            &InputMode::Normal,
+            "",
+            true,
+            &[],
+            &DataFormat::Hex,
+        );
+    }
+
+    #[test]
+    fn test_server_panel_advertising_editing() {
+        let _table = server_panel(
+            "my-device",
+            "0000180d-0000-1000-8000-00805f9b34fb",
+            "00002a37-0000-1000-8000-00805f9b34fb",
+            true,
+            &ServerField::Name,
+            &InputMode::Editing,
+            "FF 00",
+            true,
+            &[0xFF],
+            &DataFormat::Hex,
+        );
+    }
+
+    #[test]
+    fn test_server_panel_editing_config() {
         let _table = server_panel(
             "btlescan",
             "0000180d-0000-1000-8000-00805f9b34fb",
@@ -126,6 +206,8 @@ mod tests {
             &InputMode::Editing,
             "b42e2a68-ade7-11e4",
             true,
+            &[],
+            &DataFormat::Hex,
         );
     }
 }

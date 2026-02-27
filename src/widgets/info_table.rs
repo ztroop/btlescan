@@ -13,6 +13,7 @@ pub fn info_table(
     signal: bool,
     is_loading: &bool,
     frame_count: &usize,
+    is_advertising: bool,
 ) -> Table<'static> {
     let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let index = frame_count % spinner.len();
@@ -46,7 +47,12 @@ pub fn info_table(
             parts.join(" ")
         }
         (AppMode::Server, InputMode::Normal) => {
-            "[q → exit] [m → mode] [a → advertise] [x → stop]".to_string()
+            if is_advertising {
+                "[q → exit] [m → mode] [w → set value] [n → notify] [t → format] [x → stop]"
+                    .to_string()
+            } else {
+                "[q → exit] [m → mode] [a → advertise]".to_string()
+            }
         }
     };
 

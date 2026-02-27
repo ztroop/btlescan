@@ -176,6 +176,7 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
         app.pause_status.load(Ordering::SeqCst),
         &app.is_loading,
         &app.frame_count,
+        false,
     );
     f.render_widget(info, outer[3]);
 }
@@ -194,6 +195,7 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         .split(f.area());
 
     // Server config panel
+    let current_value = app.get_server_char_value();
     let srv = server_panel(
         &app.server_name,
         &app.server_service_uuid,
@@ -203,6 +205,8 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         &app.input_mode,
         &app.input_buffer,
         true,
+        &current_value,
+        &app.data_format,
     );
     f.render_widget(srv, outer[0]);
 
@@ -218,6 +222,7 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         false,
         &app.is_loading,
         &app.frame_count,
+        app.is_advertising,
     );
     f.render_widget(info, outer[2]);
 }
@@ -237,16 +242,27 @@ fn handle_editing_input(app: &mut App, key: KeyCode) {
                     }
                 }
                 AppMode::Server => {
-                    let field = app.server_field_focus.clone();
-                    if matches!(field, ServerField::ServiceUuid | ServerField::CharUuid)
-                        && uuid::Uuid::parse_str(&app.input_buffer).is_err()
-                    {
-                        app.error_message = format!("Invalid UUID: '{}'", app.input_buffer);
-                        app.error_view = true;
-                        return;
+                    if app.is_advertising {
+                        match app.parse_input() {
+                            Ok(data) => {
+                                app.set_server_char_value(data);
+                            }
+                            Err(e) => {
+                                app.add_log(LogDirection::Error, e);
+                            }
+                        }
+                    } else {
+                        let field = app.server_field_focus.clone();
+                        if matches!(field, ServerField::ServiceUuid | ServerField::CharUuid)
+                            && uuid::Uuid::parse_str(&app.input_buffer).is_err()
+                        {
+                            app.error_message = format!("Invalid UUID: '{}'", app.input_buffer);
+                            app.error_view = true;
+                            return;
+                        }
+                        let value = app.input_buffer.clone();
+                        app.set_server_field_value(&field, value);
                     }
-                    let value = app.input_buffer.clone();
-                    app.set_server_field_value(&field, value);
                 }
             }
             app.input_mode = InputMode::Normal;
@@ -256,7 +272,10 @@ fn handle_editing_input(app: &mut App, key: KeyCode) {
         KeyCode::Backspace => {
             app.delete_char();
         }
-        KeyCode::Char('t') if app.input_buffer.is_empty() && app.mode == AppMode::Client => {
+        KeyCode::Char('t')
+            if app.input_buffer.is_empty()
+                && (app.mode == AppMode::Client || app.is_advertising) =>
+        {
             app.toggle_data_format();
         }
         KeyCode::Char(c) => {
@@ -444,6 +463,15 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
         KeyCode::Char('x') if app.is_advertising => {
             app.stop_server().await;
         }
+        KeyCode::Char('w') if app.is_advertising => {
+            app.input_mode = InputMode::Editing;
+        }
+        KeyCode::Char('n') if app.is_advertising => {
+            app.send_server_notify().await;
+        }
+        KeyCode::Char('t') if app.is_advertising => {
+            app.toggle_data_format();
+        }
         KeyCode::Enter if !app.is_advertising => {
             let field = &app.server_field_focus;
             let current = app.server_field_value(field).to_string();
@@ -456,6 +484,13 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
         }
         KeyCode::Up | KeyCode::Char('k') if !app.is_advertising => {
             app.server_field_focus = app.server_field_focus.prev();
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.is_advertising => {
+            let max_scroll = app.message_log.len().saturating_sub(1);
+            app.log_scroll = (app.log_scroll + 1).min(max_scroll);
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.is_advertising => {
+            app.log_scroll = app.log_scroll.saturating_sub(1);
         }
         _ => {}
     }

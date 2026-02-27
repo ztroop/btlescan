@@ -3,7 +3,7 @@ use std::{
     error::Error,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -95,6 +95,7 @@ pub struct App {
     pub server_field_focus: ServerField,
     pub is_advertising: bool,
     pub server_handle: Option<ServerHandle>,
+    pub server_shared_value: Arc<Mutex<Vec<u8>>>,
 
     // UI state
     pub frame_count: usize,
@@ -141,6 +142,7 @@ impl App {
             server_field_focus: ServerField::Name,
             is_advertising: false,
             server_handle: None,
+            server_shared_value: Arc::new(Mutex::new(Vec::new())),
 
             frame_count: 0,
             is_loading: false,
@@ -304,7 +306,8 @@ impl App {
         };
         let tx = self.tx.clone();
         let name = self.server_name.clone();
-        match server::start_server(tx, name, service_uuid, char_uuid).await {
+        let shared_value = Arc::clone(&self.server_shared_value);
+        match server::start_server(tx, name, service_uuid, char_uuid, shared_value).await {
             Ok(handle) => {
                 self.server_handle = Some(handle);
                 self.is_advertising = true;
@@ -323,7 +326,42 @@ impl App {
             handle.stop().await;
         }
         self.is_advertising = false;
+        *self.server_shared_value.lock().unwrap() = Vec::new();
         self.add_log(LogDirection::Info, "GATT server stopped".into());
+    }
+
+    pub fn set_server_char_value(&mut self, data: Vec<u8>) {
+        let hex_str = bytes_to_hex(&data);
+        if let Some(handle) = &self.server_handle {
+            handle.set_value(data);
+            self.add_log(LogDirection::Info, format!("Value set: {}", hex_str));
+        }
+    }
+
+    pub async fn send_server_notify(&mut self) {
+        if let Some(handle) = &mut self.server_handle {
+            let value = handle.get_value();
+            if value.is_empty() {
+                self.add_log(
+                    LogDirection::Error,
+                    "No value set — use 'w' to set a value first".into(),
+                );
+                return;
+            }
+            let hex_str = bytes_to_hex(&value);
+            match handle.update_value(value).await {
+                Ok(_) => {
+                    self.add_log(LogDirection::Sent, format!("Notify: {}", hex_str));
+                }
+                Err(e) => {
+                    self.add_log(LogDirection::Error, format!("Notify failed: {}", e));
+                }
+            }
+        }
+    }
+
+    pub fn get_server_char_value(&self) -> Vec<u8> {
+        self.server_shared_value.lock().unwrap().clone()
     }
 
     pub fn server_field_value(&self, field: &ServerField) -> &str {
