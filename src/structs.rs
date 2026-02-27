@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppMode {
     Client,
+    #[cfg(feature = "server")]
     Server,
 }
 
@@ -101,6 +102,7 @@ impl LogEntry {
     }
 }
 
+#[cfg(feature = "server")]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerField {
     Name,
@@ -108,6 +110,7 @@ pub enum ServerField {
     CharUuid,
 }
 
+#[cfg(feature = "server")]
 impl ServerField {
     pub fn next(&self) -> Self {
         match self {
@@ -263,6 +266,7 @@ mod tests {
         assert!(device.device.is_none());
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_app_mode_variants() {
         assert_ne!(AppMode::Client, AppMode::Server);
@@ -273,6 +277,7 @@ mod tests {
         assert_ne!(InputMode::Normal, InputMode::Editing);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_field_next() {
         assert_eq!(ServerField::Name.next(), ServerField::ServiceUuid);
@@ -280,6 +285,7 @@ mod tests {
         assert_eq!(ServerField::CharUuid.next(), ServerField::Name);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_field_prev() {
         assert_eq!(ServerField::Name.prev(), ServerField::CharUuid);
@@ -287,6 +293,7 @@ mod tests {
         assert_eq!(ServerField::ServiceUuid.prev(), ServerField::Name);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_field_labels() {
         assert_eq!(ServerField::Name.label(), "Device Name");

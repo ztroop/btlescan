@@ -12,7 +12,9 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::app::{App, DeviceData};
-use crate::structs::{AppMode, DeviceInfo, FocusPanel, InputMode, LogDirection, ServerField};
+#[cfg(feature = "server")]
+use crate::structs::ServerField;
+use crate::structs::{AppMode, DeviceInfo, FocusPanel, InputMode, LogDirection};
 use crate::utils::{bytes_to_hex, centered_rect};
 use crate::widgets::characteristic_panel::characteristic_panel;
 use crate::widgets::detail_table::detail_table;
@@ -20,6 +22,7 @@ use crate::widgets::device_table::device_table;
 use crate::widgets::info_table::info_table;
 use crate::widgets::message_log::message_log;
 use crate::widgets::rw_panel::rw_panel;
+#[cfg(feature = "server")]
 use crate::widgets::server_panel::server_panel;
 
 pub async fn viewer<B: Backend>(
@@ -37,6 +40,7 @@ where
 
             match app.mode {
                 AppMode::Client => draw_client_mode(f, app),
+                #[cfg(feature = "server")]
                 AppMode::Server => draw_server_mode(f, app),
             }
 
@@ -67,6 +71,7 @@ where
 
                 match app.mode {
                     AppMode::Client => handle_client_input(app, key.code).await,
+                    #[cfg(feature = "server")]
                     AppMode::Server => handle_server_input(app, key.code).await,
                 }
 
@@ -185,6 +190,7 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
     f.render_widget(info, outer[3]);
 }
 
+#[cfg(feature = "server")]
 fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
     app.frame_count += 1;
 
@@ -245,6 +251,7 @@ fn handle_editing_input(app: &mut App, key: KeyCode) {
                         app.add_log(LogDirection::Error, e);
                     }
                 }
+                #[cfg(feature = "server")]
                 AppMode::Server => {
                     if app.is_advertising {
                         match app.parse_input() {
@@ -307,6 +314,7 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
         KeyCode::Tab => {
             app.cycle_focus();
         }
+        #[cfg(feature = "server")]
         KeyCode::Char('m') => {
             app.stop_scan().await;
             app.toggle_mode();
@@ -451,6 +459,7 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
     }
 }
 
+#[cfg(feature = "server")]
 async fn handle_server_input(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('q') => {
@@ -577,6 +586,7 @@ fn process_channel_messages(app: &mut App) {
             DeviceData::Info(info) => {
                 app.add_log(LogDirection::Info, info);
             }
+            #[cfg(feature = "server")]
             DeviceData::ServerLog { direction, message } => {
                 app.add_log(direction, message);
             }

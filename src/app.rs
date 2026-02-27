@@ -3,9 +3,12 @@ use std::{
     error::Error,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
+
+#[cfg(feature = "server")]
+use std::sync::Mutex;
 
 use ratatui::widgets::TableState;
 use tokio::sync::{
@@ -19,12 +22,17 @@ use crate::{
         bluetooth_scan, connect_device, disconnect_device, read_characteristic_value,
         subscribe_to_notifications, unsubscribe_from_notifications, write_characteristic_value,
     },
-    server::{self, ServerHandle},
     structs::{
         AppMode, Characteristic, DataFormat, DeviceCsv, DeviceInfo, FocusPanel, InputMode,
-        LogDirection, LogEntry, ServerField,
+        LogDirection, LogEntry,
     },
     utils::{bytes_to_hex, hex_to_bytes},
+};
+
+#[cfg(feature = "server")]
+use crate::{
+    server::{self, ServerHandle},
+    structs::ServerField,
 };
 
 pub enum DeviceData {
@@ -49,6 +57,7 @@ pub enum DeviceData {
     },
     Error(String),
     Info(String),
+    #[cfg(feature = "server")]
     ServerLog {
         direction: LogDirection,
         message: String,
@@ -94,12 +103,18 @@ pub struct App {
     pub log_scroll: usize,
 
     // Server
-    pub server_name: String,
-    pub server_service_uuid: String,
-    pub server_char_uuid: String,
-    pub server_field_focus: ServerField,
     pub is_advertising: bool,
+    #[cfg(feature = "server")]
+    pub server_name: String,
+    #[cfg(feature = "server")]
+    pub server_service_uuid: String,
+    #[cfg(feature = "server")]
+    pub server_char_uuid: String,
+    #[cfg(feature = "server")]
+    pub server_field_focus: ServerField,
+    #[cfg(feature = "server")]
     pub server_handle: Option<ServerHandle>,
+    #[cfg(feature = "server")]
     pub server_shared_value: Arc<Mutex<Vec<u8>>>,
 
     // UI state
@@ -143,12 +158,18 @@ impl App {
             message_log: Vec::new(),
             log_scroll: 0,
 
-            server_name: "btlescan".to_string(),
-            server_service_uuid: "0000180d-0000-1000-8000-00805f9b34fb".to_string(),
-            server_char_uuid: "00002a37-0000-1000-8000-00805f9b34fb".to_string(),
-            server_field_focus: ServerField::Name,
             is_advertising: false,
+            #[cfg(feature = "server")]
+            server_name: "btlescan".to_string(),
+            #[cfg(feature = "server")]
+            server_service_uuid: "0000180d-0000-1000-8000-00805f9b34fb".to_string(),
+            #[cfg(feature = "server")]
+            server_char_uuid: "00002a37-0000-1000-8000-00805f9b34fb".to_string(),
+            #[cfg(feature = "server")]
+            server_field_focus: ServerField::Name,
+            #[cfg(feature = "server")]
             server_handle: None,
+            #[cfg(feature = "server")]
             server_shared_value: Arc::new(Mutex::new(Vec::new())),
 
             frame_count: 0,
@@ -298,6 +319,7 @@ impl App {
         self.data_format = self.data_format.toggle();
     }
 
+    #[cfg(feature = "server")]
     pub fn toggle_mode(&mut self) {
         self.mode = match self.mode {
             AppMode::Client => AppMode::Server,
@@ -305,6 +327,7 @@ impl App {
         };
     }
 
+    #[cfg(feature = "server")]
     pub async fn start_server(&mut self) {
         if self.is_advertising {
             return;
@@ -342,6 +365,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "server")]
     pub async fn stop_server(&mut self) {
         if let Some(mut handle) = self.server_handle.take() {
             handle.stop().await;
@@ -351,6 +375,7 @@ impl App {
         self.add_log(LogDirection::Info, "GATT server stopped".into());
     }
 
+    #[cfg(feature = "server")]
     pub fn set_server_char_value(&mut self, data: Vec<u8>) {
         let hex_str = bytes_to_hex(&data);
         if let Some(handle) = &self.server_handle {
@@ -359,6 +384,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "server")]
     pub async fn send_server_notify(&mut self) {
         if let Some(handle) = &mut self.server_handle {
             let value = handle.get_value();
@@ -381,10 +407,12 @@ impl App {
         }
     }
 
+    #[cfg(feature = "server")]
     pub fn get_server_char_value(&self) -> Vec<u8> {
         self.server_shared_value.lock().unwrap().clone()
     }
 
+    #[cfg(feature = "server")]
     pub fn server_field_value(&self, field: &ServerField) -> &str {
         match field {
             ServerField::Name => &self.server_name,
@@ -393,6 +421,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "server")]
     pub fn set_server_field_value(&mut self, field: &ServerField, value: String) {
         match field {
             ServerField::Name => self.server_name = value,
@@ -459,6 +488,7 @@ mod tests {
         assert!(app.devices.is_empty());
         assert!(app.selected_characteristics.is_empty());
         assert!(app.message_log.is_empty());
+        #[cfg(feature = "server")]
         assert_eq!(app.server_name, "btlescan");
     }
 
@@ -476,6 +506,7 @@ mod tests {
         assert_eq!(app.focus, FocusPanel::DeviceList);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_toggle_mode() {
         let mut app = App::new();
@@ -567,6 +598,7 @@ mod tests {
         assert_eq!(app.log_scroll, 9);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_field_defaults() {
         let app = App::new();
@@ -579,6 +611,7 @@ mod tests {
         assert_eq!(app.server_field_focus, ServerField::Name);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_field_get_set() {
         let mut app = App::new();
@@ -597,6 +630,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_server_uuid_validation() {
         assert!(Uuid::parse_str("0000180d-0000-1000-8000-00805f9b34fb").is_ok());
