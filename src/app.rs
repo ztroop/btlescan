@@ -7,8 +7,14 @@ use std::{
     },
 };
 
+#[cfg(feature = "server")]
+use std::sync::Mutex;
+
 use ratatui::widgets::TableState;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -23,16 +29,39 @@ use crate::{
     utils::{bytes_to_hex, hex_to_bytes},
 };
 
+#[cfg(feature = "server")]
+use crate::{
+    server::{self, ServerHandle},
+    structs::ServerField,
+};
+
 pub enum DeviceData {
     DeviceInfo(Box<DeviceInfo>),
     Characteristics(Vec<Characteristic>),
-    CharacteristicValue { uuid: Uuid, value: Vec<u8> },
-    Notification { uuid: Uuid, value: Vec<u8> },
-    WriteComplete { uuid: Uuid },
-    SubscribeComplete { uuid: Uuid },
-    UnsubscribeComplete { uuid: Uuid },
+    CharacteristicValue {
+        uuid: Uuid,
+        value: Vec<u8>,
+    },
+    Notification {
+        uuid: Uuid,
+        value: Vec<u8>,
+    },
+    WriteComplete {
+        uuid: Uuid,
+    },
+    SubscribeComplete {
+        uuid: Uuid,
+    },
+    UnsubscribeComplete {
+        uuid: Uuid,
+    },
     Error(String),
     Info(String),
+    #[cfg(feature = "server")]
+    ServerLog {
+        direction: LogDirection,
+        message: String,
+    },
 }
 
 pub struct App {
@@ -42,6 +71,8 @@ pub struct App {
     #[allow(dead_code)]
     pub loading_status: Arc<AtomicBool>,
     pub pause_status: Arc<AtomicBool>,
+    pub scan_shutdown: Option<oneshot::Sender<()>>,
+    pub scan_handle: Option<tokio::task::JoinHandle<()>>,
 
     // Mode and navigation
     pub mode: AppMode,
@@ -72,8 +103,19 @@ pub struct App {
     pub log_scroll: usize,
 
     // Server
-    pub server_name: String,
     pub is_advertising: bool,
+    #[cfg(feature = "server")]
+    pub server_name: String,
+    #[cfg(feature = "server")]
+    pub server_service_uuid: String,
+    #[cfg(feature = "server")]
+    pub server_char_uuid: String,
+    #[cfg(feature = "server")]
+    pub server_field_focus: ServerField,
+    #[cfg(feature = "server")]
+    pub server_handle: Option<ServerHandle>,
+    #[cfg(feature = "server")]
+    pub server_shared_value: Arc<Mutex<Vec<u8>>>,
 
     // UI state
     pub frame_count: usize,
@@ -91,6 +133,8 @@ impl App {
             rx,
             loading_status: Arc::new(AtomicBool::default()),
             pause_status: Arc::new(AtomicBool::default()),
+            scan_shutdown: None,
+            scan_handle: None,
 
             mode: AppMode::Client,
             focus: FocusPanel::DeviceList,
@@ -114,8 +158,19 @@ impl App {
             message_log: Vec::new(),
             log_scroll: 0,
 
-            server_name: "btlescan".to_string(),
             is_advertising: false,
+            #[cfg(feature = "server")]
+            server_name: "btlescan".to_string(),
+            #[cfg(feature = "server")]
+            server_service_uuid: "0000180d-0000-1000-8000-00805f9b34fb".to_string(),
+            #[cfg(feature = "server")]
+            server_char_uuid: "00002a37-0000-1000-8000-00805f9b34fb".to_string(),
+            #[cfg(feature = "server")]
+            server_field_focus: ServerField::Name,
+            #[cfg(feature = "server")]
+            server_handle: None,
+            #[cfg(feature = "server")]
+            server_shared_value: Arc::new(Mutex::new(Vec::new())),
 
             frame_count: 0,
             is_loading: false,
@@ -126,9 +181,23 @@ impl App {
     }
 
     pub async fn scan(&mut self) {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        self.scan_shutdown = Some(shutdown_tx);
         let pause_signal_clone = Arc::clone(&self.pause_status);
         let tx_clone = self.tx.clone();
-        tokio::spawn(async move { bluetooth_scan(tx_clone, pause_signal_clone).await });
+        self.scan_handle = Some(tokio::spawn(async move {
+            bluetooth_scan(tx_clone, pause_signal_clone, shutdown_rx).await
+        }));
+    }
+
+    pub async fn stop_scan(&mut self) {
+        if let Some(tx) = self.scan_shutdown.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.scan_handle.take() {
+            let _ = handle.await;
+        }
+        self.pause_status.store(true, Ordering::SeqCst);
     }
 
     pub async fn connect(&mut self) {
@@ -138,7 +207,7 @@ impl App {
             .cloned();
 
         if let Some(device) = selected_device {
-            self.pause_status.store(true, Ordering::SeqCst);
+            self.stop_scan().await;
             self.is_loading = true;
             let device = Arc::new(device);
             self.connected_device = Some(Arc::clone(&device));
@@ -161,8 +230,8 @@ impl App {
         self.subscribed_chars.clear();
         self.input_buffer.clear();
         self.cursor_position = 0;
-        self.pause_status.store(false, Ordering::SeqCst);
         self.add_log(LogDirection::Info, "Disconnected from device".into());
+        self.scan().await;
     }
 
     pub fn read_selected_characteristic(&self) {
@@ -250,11 +319,115 @@ impl App {
         self.data_format = self.data_format.toggle();
     }
 
+    #[cfg(feature = "server")]
     pub fn toggle_mode(&mut self) {
         self.mode = match self.mode {
             AppMode::Client => AppMode::Server,
             AppMode::Server => AppMode::Client,
         };
+    }
+
+    #[cfg(feature = "server")]
+    pub async fn start_server(&mut self) {
+        if self.is_advertising {
+            return;
+        }
+        let service_uuid = match Uuid::parse_str(&self.server_service_uuid) {
+            Ok(u) => u,
+            Err(e) => {
+                self.error_message = format!("Invalid service UUID: {}", e);
+                self.error_view = true;
+                return;
+            }
+        };
+        let char_uuid = match Uuid::parse_str(&self.server_char_uuid) {
+            Ok(u) => u,
+            Err(e) => {
+                self.error_message = format!("Invalid characteristic UUID: {}", e);
+                self.error_view = true;
+                return;
+            }
+        };
+        let tx = self.tx.clone();
+        let name = self.server_name.clone();
+        let shared_value = Arc::clone(&self.server_shared_value);
+        match server::start_server(tx, name, service_uuid, char_uuid, shared_value).await {
+            Ok(handle) => {
+                self.server_handle = Some(handle);
+                self.is_advertising = true;
+                self.add_log(LogDirection::Info, "GATT server advertising started".into());
+            }
+            Err(e) => {
+                self.add_log(LogDirection::Error, format!("Server start failed: {}", e));
+                self.error_message = format!("Server start failed: {}", e);
+                self.error_view = true;
+            }
+        }
+    }
+
+    #[cfg(feature = "server")]
+    pub async fn stop_server(&mut self) {
+        if let Some(mut handle) = self.server_handle.take() {
+            handle.stop().await;
+        }
+        self.is_advertising = false;
+        *self.server_shared_value.lock().unwrap() = Vec::new();
+        self.add_log(LogDirection::Info, "GATT server stopped".into());
+    }
+
+    #[cfg(feature = "server")]
+    pub fn set_server_char_value(&mut self, data: Vec<u8>) {
+        let hex_str = bytes_to_hex(&data);
+        if let Some(handle) = &self.server_handle {
+            handle.set_value(data);
+            self.add_log(LogDirection::Info, format!("Value set: {}", hex_str));
+        }
+    }
+
+    #[cfg(feature = "server")]
+    pub async fn send_server_notify(&mut self) {
+        if let Some(handle) = &mut self.server_handle {
+            let value = handle.get_value();
+            if value.is_empty() {
+                self.add_log(
+                    LogDirection::Error,
+                    "No value set — use 'w' to set a value first".into(),
+                );
+                return;
+            }
+            let hex_str = bytes_to_hex(&value);
+            match handle.update_value(value).await {
+                Ok(_) => {
+                    self.add_log(LogDirection::Sent, format!("Notify: {}", hex_str));
+                }
+                Err(e) => {
+                    self.add_log(LogDirection::Error, format!("Notify failed: {}", e));
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "server")]
+    pub fn get_server_char_value(&self) -> Vec<u8> {
+        self.server_shared_value.lock().unwrap().clone()
+    }
+
+    #[cfg(feature = "server")]
+    pub fn server_field_value(&self, field: &ServerField) -> &str {
+        match field {
+            ServerField::Name => &self.server_name,
+            ServerField::ServiceUuid => &self.server_service_uuid,
+            ServerField::CharUuid => &self.server_char_uuid,
+        }
+    }
+
+    #[cfg(feature = "server")]
+    pub fn set_server_field_value(&mut self, field: &ServerField, value: String) {
+        match field {
+            ServerField::Name => self.server_name = value,
+            ServerField::ServiceUuid => self.server_service_uuid = value,
+            ServerField::CharUuid => self.server_char_uuid = value,
+        }
     }
 
     pub fn parse_input(&self) -> Result<Vec<u8>, String> {
@@ -315,6 +488,7 @@ mod tests {
         assert!(app.devices.is_empty());
         assert!(app.selected_characteristics.is_empty());
         assert!(app.message_log.is_empty());
+        #[cfg(feature = "server")]
         assert_eq!(app.server_name, "btlescan");
     }
 
@@ -332,6 +506,7 @@ mod tests {
         assert_eq!(app.focus, FocusPanel::DeviceList);
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_toggle_mode() {
         let mut app = App::new();
@@ -421,5 +596,46 @@ mod tests {
             app.add_log(LogDirection::Info, format!("msg {}", i));
         }
         assert_eq!(app.log_scroll, 9);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_field_defaults() {
+        let app = App::new();
+        assert_eq!(app.server_name, "btlescan");
+        assert_eq!(
+            app.server_service_uuid,
+            "0000180d-0000-1000-8000-00805f9b34fb"
+        );
+        assert_eq!(app.server_char_uuid, "00002a37-0000-1000-8000-00805f9b34fb");
+        assert_eq!(app.server_field_focus, ServerField::Name);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_field_get_set() {
+        let mut app = App::new();
+        assert_eq!(app.server_field_value(&ServerField::Name), "btlescan");
+
+        app.set_server_field_value(&ServerField::Name, "my-device".into());
+        assert_eq!(app.server_field_value(&ServerField::Name), "my-device");
+
+        app.set_server_field_value(
+            &ServerField::ServiceUuid,
+            "b42e2a68-ade7-11e4-89d3-123b93f75cba".into(),
+        );
+        assert_eq!(
+            app.server_field_value(&ServerField::ServiceUuid),
+            "b42e2a68-ade7-11e4-89d3-123b93f75cba"
+        );
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_uuid_validation() {
+        assert!(Uuid::parse_str("0000180d-0000-1000-8000-00805f9b34fb").is_ok());
+        assert!(Uuid::parse_str("b42e2a68-ade7-11e4-89d3-123b93f75cba").is_ok());
+        assert!(Uuid::parse_str("not-a-uuid").is_err());
+        assert!(Uuid::parse_str("").is_err());
     }
 }

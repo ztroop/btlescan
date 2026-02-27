@@ -12,10 +12,12 @@ A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecti
 - **GATT Inspection** — Connect to a device, discover services, and browse characteristics with their properties.
 - **Read / Write** — Read characteristic values or write data in hex or text format.
 - **Notifications** — Subscribe to characteristic notifications with a timestamped message log.
-- **Server Mode** — Framework for GATT server advertising (platform-specific backend required).
+- **Server Mode** _(Linux only, opt-in)_ — Run a GATT server: set characteristic values for read responses, send notifications to subscribed clients.
 - **CSV Export** — Export the device list to a CSV file.
 
 ## Keyboard Controls
+
+### Client Mode
 
 | Key | Action |
 |-----|--------|
@@ -30,7 +32,20 @@ A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecti
 | `t` | Toggle hex / text input format |
 | `s` | Toggle scan pause/resume |
 | `e` | Export devices to CSV |
-| `m` | Switch client / server mode |
+| `m` | Switch to server mode |
+| `Esc` | Cancel editing |
+
+### Server Mode
+
+| Key | Action |
+|-----|--------|
+| `a` | Start advertising |
+| `x` | Stop advertising |
+| `w` | Set characteristic value (returned on reads) |
+| `n` | Send notification to subscribed clients |
+| `t` | Toggle hex / text input format |
+| `↑/↓` or `j/k` | Navigate fields / scroll log |
+| `m` | Switch to client mode |
 | `Esc` | Cancel editing |
 
 ## Installation
@@ -38,6 +53,12 @@ A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecti
 ```sh
 git clone git@github.com:ztroop/btlescan.git && cd ./btlescan
 cargo install --path .
+```
+
+To include the GATT server feature (Linux only):
+
+```sh
+cargo install --path . --features server
 ```
 
 ### Arch Linux (AUR)

@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::structs::{AppMode, InputMode};
 
+#[allow(unused_variables)]
 pub fn info_table(
     mode: &AppMode,
     input_mode: &InputMode,
@@ -13,6 +14,7 @@ pub fn info_table(
     signal: bool,
     is_loading: &bool,
     frame_count: &usize,
+    is_advertising: bool,
 ) -> Table<'static> {
     let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let index = frame_count % spinner.len();
@@ -20,7 +22,9 @@ pub fn info_table(
     let info_text = match (mode, input_mode) {
         (_, InputMode::Editing) => "[Esc → cancel] [Enter → send] [t → format]".to_string(),
         (AppMode::Client, InputMode::Normal) => {
-            let mut parts = vec!["[q → exit]", "[Tab → focus]", "[m → mode]"];
+            let mut parts = vec!["[q → exit]", "[Tab → focus]"];
+            #[cfg(feature = "server")]
+            parts.push("[m → mode]");
             if is_connected {
                 parts.extend_from_slice(&[
                     "[r → read]",
@@ -45,8 +49,14 @@ pub fn info_table(
             }
             parts.join(" ")
         }
+        #[cfg(feature = "server")]
         (AppMode::Server, InputMode::Normal) => {
-            "[q → exit] [m → mode] [a → advertise] [x → stop]".to_string()
+            if is_advertising {
+                "[q → exit] [m → mode] [w → set value] [n → notify] [t → format] [x → stop]"
+                    .to_string()
+            } else {
+                "[q → exit] [m → mode] [a → advertise]".to_string()
+            }
         }
     };
 

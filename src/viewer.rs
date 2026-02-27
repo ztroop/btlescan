@@ -12,6 +12,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::app::{App, DeviceData};
+#[cfg(feature = "server")]
+use crate::structs::ServerField;
 use crate::structs::{AppMode, DeviceInfo, FocusPanel, InputMode, LogDirection};
 use crate::utils::{bytes_to_hex, centered_rect};
 use crate::widgets::characteristic_panel::characteristic_panel;
@@ -20,6 +22,7 @@ use crate::widgets::device_table::device_table;
 use crate::widgets::info_table::info_table;
 use crate::widgets::message_log::message_log;
 use crate::widgets::rw_panel::rw_panel;
+#[cfg(feature = "server")]
 use crate::widgets::server_panel::server_panel;
 
 pub async fn viewer<B: Backend>(
@@ -37,6 +40,7 @@ where
 
             match app.mode {
                 AppMode::Client => draw_client_mode(f, app),
+                #[cfg(feature = "server")]
                 AppMode::Server => draw_server_mode(f, app),
             }
 
@@ -67,7 +71,8 @@ where
 
                 match app.mode {
                     AppMode::Client => handle_client_input(app, key.code).await,
-                    AppMode::Server => handle_server_input(app, key.code),
+                    #[cfg(feature = "server")]
+                    AppMode::Server => handle_server_input(app, key.code).await,
                 }
 
                 if app.should_quit {
@@ -76,7 +81,11 @@ where
             }
         }
 
+        let was_loading = app.is_loading;
         process_channel_messages(app);
+        if was_loading && !app.is_loading && !app.is_connected {
+            app.scan().await;
+        }
     }
 }
 
@@ -176,10 +185,12 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
         app.pause_status.load(Ordering::SeqCst),
         &app.is_loading,
         &app.frame_count,
+        false,
     );
     f.render_widget(info, outer[3]);
 }
 
+#[cfg(feature = "server")]
 fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
     app.frame_count += 1;
 
@@ -194,7 +205,19 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         .split(f.area());
 
     // Server config panel
-    let srv = server_panel(&app.server_name, app.is_advertising, true);
+    let current_value = app.get_server_char_value();
+    let srv = server_panel(
+        &app.server_name,
+        &app.server_service_uuid,
+        &app.server_char_uuid,
+        app.is_advertising,
+        &app.server_field_focus,
+        &app.input_mode,
+        &app.input_buffer,
+        true,
+        &current_value,
+        &app.data_format,
+    );
     f.render_widget(srv, outer[0]);
 
     // Message log
@@ -209,6 +232,7 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         false,
         &app.is_loading,
         &app.frame_count,
+        app.is_advertising,
     );
     f.render_widget(info, outer[2]);
 }
@@ -217,17 +241,52 @@ fn handle_editing_input(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
+            app.input_buffer.clear();
+            app.cursor_position = 0;
         }
         KeyCode::Enter => {
-            if let Err(e) = app.write_selected_characteristic() {
-                app.add_log(LogDirection::Error, e);
+            match app.mode {
+                AppMode::Client => {
+                    if let Err(e) = app.write_selected_characteristic() {
+                        app.add_log(LogDirection::Error, e);
+                    }
+                }
+                #[cfg(feature = "server")]
+                AppMode::Server => {
+                    if app.is_advertising {
+                        match app.parse_input() {
+                            Ok(data) => {
+                                app.set_server_char_value(data);
+                            }
+                            Err(e) => {
+                                app.add_log(LogDirection::Error, e);
+                            }
+                        }
+                    } else {
+                        let field = app.server_field_focus.clone();
+                        if matches!(field, ServerField::ServiceUuid | ServerField::CharUuid)
+                            && uuid::Uuid::parse_str(&app.input_buffer).is_err()
+                        {
+                            app.error_message = format!("Invalid UUID: '{}'", app.input_buffer);
+                            app.error_view = true;
+                            return;
+                        }
+                        let value = app.input_buffer.clone();
+                        app.set_server_field_value(&field, value);
+                    }
+                }
             }
             app.input_mode = InputMode::Normal;
+            app.input_buffer.clear();
+            app.cursor_position = 0;
         }
         KeyCode::Backspace => {
             app.delete_char();
         }
-        KeyCode::Char('t') if app.input_buffer.is_empty() => {
+        KeyCode::Char('t')
+            if app.input_buffer.is_empty()
+                && (app.mode == AppMode::Client || app.is_advertising) =>
+        {
             app.toggle_data_format();
         }
         KeyCode::Char(c) => {
@@ -255,7 +314,9 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
         KeyCode::Tab => {
             app.cycle_focus();
         }
+        #[cfg(feature = "server")]
         KeyCode::Char('m') => {
+            app.stop_scan().await;
             app.toggle_mode();
         }
         KeyCode::Char('s') if !app.is_connected => {
@@ -398,24 +459,53 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
     }
 }
 
-fn handle_server_input(app: &mut App, key: KeyCode) {
+#[cfg(feature = "server")]
+async fn handle_server_input(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('q') => {
             app.should_quit = true;
         }
         KeyCode::Char('m') => {
+            if app.is_advertising {
+                app.stop_server().await;
+            }
             app.toggle_mode();
+            app.scan().await;
         }
-        KeyCode::Char('a') => {
-            app.is_advertising = true;
-            app.add_log(
-                LogDirection::Info,
-                "GATT server advertising started (platform support required)".into(),
-            );
+        KeyCode::Char('a') if !app.is_advertising => {
+            app.start_server().await;
         }
-        KeyCode::Char('x') => {
-            app.is_advertising = false;
-            app.add_log(LogDirection::Info, "GATT server stopped".into());
+        KeyCode::Char('x') if app.is_advertising => {
+            app.stop_server().await;
+        }
+        KeyCode::Char('w') if app.is_advertising => {
+            app.input_mode = InputMode::Editing;
+        }
+        KeyCode::Char('n') if app.is_advertising => {
+            app.send_server_notify().await;
+        }
+        KeyCode::Char('t') if app.is_advertising => {
+            app.toggle_data_format();
+        }
+        KeyCode::Enter if !app.is_advertising => {
+            let field = &app.server_field_focus;
+            let current = app.server_field_value(field).to_string();
+            app.input_buffer = current;
+            app.cursor_position = app.input_buffer.len();
+            app.input_mode = InputMode::Editing;
+        }
+        KeyCode::Down | KeyCode::Char('j') if !app.is_advertising => {
+            app.server_field_focus = app.server_field_focus.next();
+        }
+        KeyCode::Up | KeyCode::Char('k') if !app.is_advertising => {
+            app.server_field_focus = app.server_field_focus.prev();
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.is_advertising => {
+            let max_scroll = app.message_log.len().saturating_sub(1);
+            app.log_scroll = (app.log_scroll + 1).min(max_scroll);
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.is_advertising => {
+            app.log_scroll = app.log_scroll.saturating_sub(1);
         }
         _ => {}
     }
@@ -426,7 +516,21 @@ fn process_channel_messages(app: &mut App) {
         match msg {
             DeviceData::DeviceInfo(boxed) => {
                 let device = *boxed;
-                app.devices.push(device);
+                if let Some(existing) = app
+                    .devices
+                    .iter_mut()
+                    .find(|d| d.get_id() == device.get_id())
+                {
+                    existing.name = device.name;
+                    existing.rssi = device.rssi;
+                    existing.tx_power = device.tx_power;
+                    existing.manufacturer_data = device.manufacturer_data;
+                    existing.services = device.services;
+                    existing.service_data = device.service_data;
+                    existing.device = device.device;
+                } else {
+                    app.devices.push(device);
+                }
                 if app.table_state.selected().is_none() {
                     app.table_state.select(Some(0));
                 }
@@ -481,6 +585,10 @@ fn process_channel_messages(app: &mut App) {
             }
             DeviceData::Info(info) => {
                 app.add_log(LogDirection::Info, info);
+            }
+            #[cfg(feature = "server")]
+            DeviceData::ServerLog { direction, message } => {
+                app.add_log(direction, message);
             }
         }
     }

@@ -1,7 +1,10 @@
 [package]
 name = "btlescan"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2021"
+
+[features]
+server = ["ble-peripheral-rust"]
 
 [dependencies]
 btleplug = "0.11"
@@ -14,3 +17,4 @@ uuid = "1.6"
 lazy_static = "1.4.0"
 csv = "1.3"
 serde = { version = "1.0", features = ["derive"] }
+ble-peripheral-rust = { version = "0.2", optional = true }

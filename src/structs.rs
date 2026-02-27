@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppMode {
     Client,
+    #[cfg(feature = "server")]
     Server,
 }
 
@@ -97,6 +98,41 @@ impl LogEntry {
             timestamp: timestamp.to_string(),
             direction,
             message,
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ServerField {
+    Name,
+    ServiceUuid,
+    CharUuid,
+}
+
+#[cfg(feature = "server")]
+impl ServerField {
+    pub fn next(&self) -> Self {
+        match self {
+            ServerField::Name => ServerField::ServiceUuid,
+            ServerField::ServiceUuid => ServerField::CharUuid,
+            ServerField::CharUuid => ServerField::Name,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            ServerField::Name => ServerField::CharUuid,
+            ServerField::ServiceUuid => ServerField::Name,
+            ServerField::CharUuid => ServerField::ServiceUuid,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            ServerField::Name => "Device Name",
+            ServerField::ServiceUuid => "Service UUID",
+            ServerField::CharUuid => "Char UUID",
         }
     }
 }
@@ -230,6 +266,7 @@ mod tests {
         assert!(device.device.is_none());
     }
 
+    #[cfg(feature = "server")]
     #[test]
     fn test_app_mode_variants() {
         assert_ne!(AppMode::Client, AppMode::Server);
@@ -238,5 +275,29 @@ mod tests {
     #[test]
     fn test_input_mode_variants() {
         assert_ne!(InputMode::Normal, InputMode::Editing);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_field_next() {
+        assert_eq!(ServerField::Name.next(), ServerField::ServiceUuid);
+        assert_eq!(ServerField::ServiceUuid.next(), ServerField::CharUuid);
+        assert_eq!(ServerField::CharUuid.next(), ServerField::Name);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_field_prev() {
+        assert_eq!(ServerField::Name.prev(), ServerField::CharUuid);
+        assert_eq!(ServerField::CharUuid.prev(), ServerField::ServiceUuid);
+        assert_eq!(ServerField::ServiceUuid.prev(), ServerField::Name);
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn test_server_field_labels() {
+        assert_eq!(ServerField::Name.label(), "Device Name");
+        assert_eq!(ServerField::ServiceUuid.label(), "Service UUID");
+        assert_eq!(ServerField::CharUuid.label(), "Char UUID");
     }
 }
