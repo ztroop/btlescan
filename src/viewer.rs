@@ -76,7 +76,11 @@ where
             }
         }
 
+        let was_loading = app.is_loading;
         process_channel_messages(app);
+        if was_loading && !app.is_loading && !app.is_connected {
+            app.scan().await;
+        }
     }
 }
 
@@ -503,7 +507,21 @@ fn process_channel_messages(app: &mut App) {
         match msg {
             DeviceData::DeviceInfo(boxed) => {
                 let device = *boxed;
-                app.devices.push(device);
+                if let Some(existing) = app
+                    .devices
+                    .iter_mut()
+                    .find(|d| d.get_id() == device.get_id())
+                {
+                    existing.name = device.name;
+                    existing.rssi = device.rssi;
+                    existing.tx_power = device.tx_power;
+                    existing.manufacturer_data = device.manufacturer_data;
+                    existing.services = device.services;
+                    existing.service_data = device.service_data;
+                    existing.device = device.device;
+                } else {
+                    app.devices.push(device);
+                }
                 if app.table_state.selected().is_none() {
                     app.table_state.select(Some(0));
                 }

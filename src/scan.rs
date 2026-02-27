@@ -58,7 +58,7 @@ pub async fn bluetooth_scan(
             }
             event = events.next() => {
                 match event {
-                    Some(CentralEvent::DeviceDiscovered(id)) => {
+                    Some(CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id)) => {
                         if let Ok(device) = central.peripheral(&id).await {
                             let properties = device
                                 .properties()

@@ -186,7 +186,7 @@ impl App {
             .cloned();
 
         if let Some(device) = selected_device {
-            self.pause_status.store(true, Ordering::SeqCst);
+            self.stop_scan().await;
             self.is_loading = true;
             let device = Arc::new(device);
             self.connected_device = Some(Arc::clone(&device));
@@ -209,8 +209,8 @@ impl App {
         self.subscribed_chars.clear();
         self.input_buffer.clear();
         self.cursor_position = 0;
-        self.pause_status.store(false, Ordering::SeqCst);
         self.add_log(LogDirection::Info, "Disconnected from device".into());
+        self.scan().await;
     }
 
     pub fn read_selected_characteristic(&self) {
