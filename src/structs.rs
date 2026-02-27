@@ -101,6 +101,39 @@ impl LogEntry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ServerField {
+    Name,
+    ServiceUuid,
+    CharUuid,
+}
+
+impl ServerField {
+    pub fn next(&self) -> Self {
+        match self {
+            ServerField::Name => ServerField::ServiceUuid,
+            ServerField::ServiceUuid => ServerField::CharUuid,
+            ServerField::CharUuid => ServerField::Name,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            ServerField::Name => ServerField::CharUuid,
+            ServerField::ServiceUuid => ServerField::Name,
+            ServerField::CharUuid => ServerField::ServiceUuid,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            ServerField::Name => "Device Name",
+            ServerField::ServiceUuid => "Service UUID",
+            ServerField::CharUuid => "Char UUID",
+        }
+    }
+}
+
 /// A struct to hold the information of a Bluetooth device.
 #[derive(Clone, Default)]
 #[allow(dead_code)]
@@ -238,5 +271,26 @@ mod tests {
     #[test]
     fn test_input_mode_variants() {
         assert_ne!(InputMode::Normal, InputMode::Editing);
+    }
+
+    #[test]
+    fn test_server_field_next() {
+        assert_eq!(ServerField::Name.next(), ServerField::ServiceUuid);
+        assert_eq!(ServerField::ServiceUuid.next(), ServerField::CharUuid);
+        assert_eq!(ServerField::CharUuid.next(), ServerField::Name);
+    }
+
+    #[test]
+    fn test_server_field_prev() {
+        assert_eq!(ServerField::Name.prev(), ServerField::CharUuid);
+        assert_eq!(ServerField::CharUuid.prev(), ServerField::ServiceUuid);
+        assert_eq!(ServerField::ServiceUuid.prev(), ServerField::Name);
+    }
+
+    #[test]
+    fn test_server_field_labels() {
+        assert_eq!(ServerField::Name.label(), "Device Name");
+        assert_eq!(ServerField::ServiceUuid.label(), "Service UUID");
+        assert_eq!(ServerField::CharUuid.label(), "Char UUID");
     }
 }

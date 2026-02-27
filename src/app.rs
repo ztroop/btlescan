@@ -16,9 +16,10 @@ use crate::{
         bluetooth_scan, connect_device, disconnect_device, read_characteristic_value,
         subscribe_to_notifications, unsubscribe_from_notifications, write_characteristic_value,
     },
+    server::{self, ServerHandle},
     structs::{
         AppMode, Characteristic, DataFormat, DeviceCsv, DeviceInfo, FocusPanel, InputMode,
-        LogDirection, LogEntry,
+        LogDirection, LogEntry, ServerField,
     },
     utils::{bytes_to_hex, hex_to_bytes},
 };
@@ -26,13 +27,29 @@ use crate::{
 pub enum DeviceData {
     DeviceInfo(Box<DeviceInfo>),
     Characteristics(Vec<Characteristic>),
-    CharacteristicValue { uuid: Uuid, value: Vec<u8> },
-    Notification { uuid: Uuid, value: Vec<u8> },
-    WriteComplete { uuid: Uuid },
-    SubscribeComplete { uuid: Uuid },
-    UnsubscribeComplete { uuid: Uuid },
+    CharacteristicValue {
+        uuid: Uuid,
+        value: Vec<u8>,
+    },
+    Notification {
+        uuid: Uuid,
+        value: Vec<u8>,
+    },
+    WriteComplete {
+        uuid: Uuid,
+    },
+    SubscribeComplete {
+        uuid: Uuid,
+    },
+    UnsubscribeComplete {
+        uuid: Uuid,
+    },
     Error(String),
     Info(String),
+    ServerLog {
+        direction: LogDirection,
+        message: String,
+    },
 }
 
 pub struct App {
@@ -73,7 +90,11 @@ pub struct App {
 
     // Server
     pub server_name: String,
+    pub server_service_uuid: String,
+    pub server_char_uuid: String,
+    pub server_field_focus: ServerField,
     pub is_advertising: bool,
+    pub server_handle: Option<ServerHandle>,
 
     // UI state
     pub frame_count: usize,
@@ -115,7 +136,11 @@ impl App {
             log_scroll: 0,
 
             server_name: "btlescan".to_string(),
+            server_service_uuid: "0000180d-0000-1000-8000-00805f9b34fb".to_string(),
+            server_char_uuid: "00002a37-0000-1000-8000-00805f9b34fb".to_string(),
+            server_field_focus: ServerField::Name,
             is_advertising: false,
+            server_handle: None,
 
             frame_count: 0,
             is_loading: false,
@@ -255,6 +280,66 @@ impl App {
             AppMode::Client => AppMode::Server,
             AppMode::Server => AppMode::Client,
         };
+    }
+
+    pub async fn start_server(&mut self) {
+        if self.is_advertising {
+            return;
+        }
+        let service_uuid = match Uuid::parse_str(&self.server_service_uuid) {
+            Ok(u) => u,
+            Err(e) => {
+                self.error_message = format!("Invalid service UUID: {}", e);
+                self.error_view = true;
+                return;
+            }
+        };
+        let char_uuid = match Uuid::parse_str(&self.server_char_uuid) {
+            Ok(u) => u,
+            Err(e) => {
+                self.error_message = format!("Invalid characteristic UUID: {}", e);
+                self.error_view = true;
+                return;
+            }
+        };
+        let tx = self.tx.clone();
+        let name = self.server_name.clone();
+        match server::start_server(tx, name, service_uuid, char_uuid).await {
+            Ok(handle) => {
+                self.server_handle = Some(handle);
+                self.is_advertising = true;
+                self.add_log(LogDirection::Info, "GATT server advertising started".into());
+            }
+            Err(e) => {
+                self.add_log(LogDirection::Error, format!("Server start failed: {}", e));
+                self.error_message = format!("Server start failed: {}", e);
+                self.error_view = true;
+            }
+        }
+    }
+
+    pub async fn stop_server(&mut self) {
+        if let Some(mut handle) = self.server_handle.take() {
+            handle.stop().await;
+        }
+        self.is_advertising = false;
+        self.add_log(LogDirection::Info, "GATT server stopped".into());
+    }
+
+    pub fn server_field_value(&self, field: &ServerField) -> &str {
+        match field {
+            ServerField::Name => &self.server_name,
+            ServerField::ServiceUuid => &self.server_service_uuid,
+            ServerField::CharUuid => &self.server_char_uuid,
+        }
+    }
+
+    pub fn set_server_field_value(&mut self, field: &ServerField, value: String) {
+        match field {
+            ServerField::Name => self.server_name = value,
+            ServerField::ServiceUuid => self.server_service_uuid = value,
+            ServerField::CharUuid => self.server_char_uuid = value,
+        }
     }
 
     pub fn parse_input(&self) -> Result<Vec<u8>, String> {
@@ -421,5 +506,43 @@ mod tests {
             app.add_log(LogDirection::Info, format!("msg {}", i));
         }
         assert_eq!(app.log_scroll, 9);
+    }
+
+    #[test]
+    fn test_server_field_defaults() {
+        let app = App::new();
+        assert_eq!(app.server_name, "btlescan");
+        assert_eq!(
+            app.server_service_uuid,
+            "0000180d-0000-1000-8000-00805f9b34fb"
+        );
+        assert_eq!(app.server_char_uuid, "00002a37-0000-1000-8000-00805f9b34fb");
+        assert_eq!(app.server_field_focus, ServerField::Name);
+    }
+
+    #[test]
+    fn test_server_field_get_set() {
+        let mut app = App::new();
+        assert_eq!(app.server_field_value(&ServerField::Name), "btlescan");
+
+        app.set_server_field_value(&ServerField::Name, "my-device".into());
+        assert_eq!(app.server_field_value(&ServerField::Name), "my-device");
+
+        app.set_server_field_value(
+            &ServerField::ServiceUuid,
+            "b42e2a68-ade7-11e4-89d3-123b93f75cba".into(),
+        );
+        assert_eq!(
+            app.server_field_value(&ServerField::ServiceUuid),
+            "b42e2a68-ade7-11e4-89d3-123b93f75cba"
+        );
+    }
+
+    #[test]
+    fn test_server_uuid_validation() {
+        assert!(Uuid::parse_str("0000180d-0000-1000-8000-00805f9b34fb").is_ok());
+        assert!(Uuid::parse_str("b42e2a68-ade7-11e4-89d3-123b93f75cba").is_ok());
+        assert!(Uuid::parse_str("not-a-uuid").is_err());
+        assert!(Uuid::parse_str("").is_err());
     }
 }

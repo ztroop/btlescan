@@ -12,6 +12,7 @@ use std::{error::Error, io};
 mod app;
 mod company_codes;
 mod scan;
+mod server;
 mod structs;
 mod utils;
 mod viewer;
