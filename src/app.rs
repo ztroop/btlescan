@@ -279,7 +279,10 @@ impl App {
 
     pub fn toggle_mode(&mut self) {
         self.mode = match self.mode {
-            AppMode::Client => AppMode::Server,
+            AppMode::Client => {
+                self.pause_status.store(true, Ordering::SeqCst);
+                AppMode::Server
+            }
             AppMode::Server => AppMode::Client,
         };
     }
