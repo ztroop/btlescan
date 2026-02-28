@@ -1,6 +1,6 @@
 [package]
 name = "btlescan"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecting GATT services and characteristics, and reading/writing characteristic values in real time."
 license = "MIT"
