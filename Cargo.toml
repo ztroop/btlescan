@@ -2,6 +2,14 @@
 name = "btlescan"
 version = "1.1.0"
 edition = "2021"
+description = "A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecting GATT services and characteristics, and reading/writing characteristic values in real time."
+license = "MIT"
+repository = "https://github.com/ztroop/btlescan"
+homepage = "https://github.com/ztroop/btlescan"
+documentation = "https://github.com/ztroop/btlescan"
+exclude = [
+    "assets/*",
+]
 
 [features]
 server = ["ble-peripheral-rust"]
