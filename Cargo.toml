@@ -7,6 +7,8 @@ license = "MIT"
 repository = "https://github.com/ztroop/btlescan"
 homepage = "https://github.com/ztroop/btlescan"
 documentation = "https://github.com/ztroop/btlescan"
+keywords = ["bluetooth", "ble", "tui", "gatt", "terminal"]
+categories = ["command-line-utilities", "network-programming"]
 exclude = [
     "assets/*",
 ]
