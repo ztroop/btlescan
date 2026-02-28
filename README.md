@@ -51,20 +51,13 @@ A cross-platform terminal UI for scanning Bluetooth Low Energy devices, inspecti
 ## Installation
 
 ```sh
-git clone git@github.com:ztroop/btlescan.git && cd ./btlescan
-cargo install --path .
+cargo install btlescan
 ```
 
 To include the GATT server feature (Linux only):
 
 ```sh
-cargo install --path . --features server
-```
-
-### Arch Linux (AUR)
-
-```sh
-paru -S btlescan
+cargo install btlescan --features server
 ```
 
 ## Alternatives
