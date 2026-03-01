@@ -331,6 +331,7 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
         }
         #[cfg(feature = "server")]
         KeyCode::Char('m') => {
+            app.scan_was_active_before_server_switch = !app.pause_status.load(Ordering::SeqCst);
             app.stop_scan().await;
             app.toggle_mode();
         }
@@ -485,7 +486,11 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
                 app.stop_server().await;
             }
             app.toggle_mode();
-            app.ensure_scan_task();
+            if app.scan_was_active_before_server_switch {
+                app.scan();
+            } else {
+                app.ensure_scan_task();
+            }
         }
         KeyCode::Char('a') if !app.is_advertising => {
             app.start_server().await;

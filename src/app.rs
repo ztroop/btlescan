@@ -130,6 +130,10 @@ pub struct App {
 
     // Server
     pub is_advertising: bool,
+    /// When switching Client→Server, we save whether scanning was active so we can resume
+    /// when returning to Client (instead of always staying paused).
+    #[cfg(feature = "server")]
+    pub scan_was_active_before_server_switch: bool,
     #[cfg(feature = "server")]
     pub server_name: String,
     #[cfg(feature = "server")]
@@ -185,6 +189,8 @@ impl App {
             log_scroll: 0,
 
             is_advertising: false,
+            #[cfg(feature = "server")]
+            scan_was_active_before_server_switch: true,
             #[cfg(feature = "server")]
             server_name: "btlescan".to_string(),
             #[cfg(feature = "server")]
