@@ -208,6 +208,15 @@ impl App {
 
     pub fn scan(&mut self) {
         self.pause_status.store(false, Ordering::SeqCst);
+        self.ensure_scan_task();
+    }
+
+    /// Spawns the scan task if not already running. Does not change pause_status, so the task
+    /// will respect the current paused state (e.g. when returning from Server mode).
+    pub fn ensure_scan_task(&mut self) {
+        if self.scan_handle.is_some() {
+            return;
+        }
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         self.scan_shutdown = Some(shutdown_tx);
         let pause_signal_clone = Arc::clone(&self.pause_status);

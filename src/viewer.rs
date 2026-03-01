@@ -485,7 +485,7 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
                 app.stop_server().await;
             }
             app.toggle_mode();
-            app.scan();
+            app.ensure_scan_task();
         }
         KeyCode::Char('a') if !app.is_advertising => {
             app.start_server().await;
