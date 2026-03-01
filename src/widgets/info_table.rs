@@ -6,14 +6,14 @@ use ratatui::{
 
 use crate::structs::{AppMode, InputMode};
 
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::fn_params_excessive_bools)]
 pub fn info_table(
     mode: &AppMode,
     input_mode: &InputMode,
     is_connected: bool,
     signal: bool,
-    is_loading: &bool,
-    frame_count: &usize,
+    is_loading: bool,
+    frame_count: usize,
     is_advertising: bool,
 ) -> Table<'static> {
     let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -42,7 +42,7 @@ pub fn info_table(
                 }
                 parts.push("[e → export]");
             }
-            if *is_loading {
+            if is_loading {
                 parts.push("");
                 let loading = format!("[loading... {}]", spinner[index]);
                 return make_table(&format!("{} {}", parts.join(" "), loading));

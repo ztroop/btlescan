@@ -22,9 +22,7 @@ pub fn rw_panel<'a>(
         Color::DarkGray
     };
 
-    let char_uuid = selected_char
-        .map(|c| c.uuid.to_string())
-        .unwrap_or_else(|| "none".to_string());
+    let char_uuid = selected_char.map_or_else(|| "none".to_string(), |c| c.uuid.to_string());
 
     let props = selected_char
         .map(|c| {
@@ -36,9 +34,7 @@ pub fn rw_panel<'a>(
         })
         .unwrap_or_default();
 
-    let current_value = char_value
-        .map(|v| bytes_to_hex(v))
-        .unwrap_or_else(|| "—".to_string());
+    let current_value = char_value.map_or_else(|| "—".to_string(), |v| bytes_to_hex(v));
 
     let sub_status = if subscribed {
         "Subscribed ●"
@@ -47,11 +43,11 @@ pub fn rw_panel<'a>(
     };
 
     let input_display = if *input_mode == InputMode::Editing {
-        format!("▸ {}_", input_buffer)
+        format!("▸ {input_buffer}_")
     } else if input_buffer.is_empty() {
         "Press 'i' to enter data".to_string()
     } else {
-        format!("  {}", input_buffer)
+        format!("  {input_buffer}")
     };
 
     let editing_color = if *input_mode == InputMode::Editing {

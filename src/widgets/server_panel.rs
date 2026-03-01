@@ -51,7 +51,7 @@ pub fn server_panel<'a>(
         let is_editing = is_selected && *input_mode == InputMode::Editing;
 
         let display_value = if is_editing {
-            format!("▸ {}_", input_buffer)
+            format!("▸ {input_buffer}_")
         } else {
             value.to_string()
         };
@@ -86,7 +86,7 @@ pub fn server_panel<'a>(
         ]));
 
         let input_display = if *input_mode == InputMode::Editing {
-            format!("▸ {}_", input_buffer)
+            format!("▸ {input_buffer}_")
         } else {
             "Press 'w' to enter data".to_string()
         };
@@ -103,7 +103,7 @@ pub fn server_panel<'a>(
         rows.push(Row::default());
         rows.push(
             Row::new(vec![
-                "".to_string(),
+                String::new(),
                 "[w → set value] [n → notify] [t → format] [x → stop]".to_string(),
             ])
             .style(Style::default().fg(Color::DarkGray)),
@@ -112,7 +112,7 @@ pub fn server_panel<'a>(
         rows.push(Row::default());
         rows.push(
             Row::new(vec![
-                "".to_string(),
+                String::new(),
                 "[Enter → edit field] [a → advertise]".to_string(),
             ])
             .style(Style::default().fg(Color::DarkGray)),
