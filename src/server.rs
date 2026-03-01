@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use ble_peripheral_rust::{
     gatt::{
@@ -14,7 +16,7 @@ use ble_peripheral_rust::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::app::DeviceData;
+use crate::app::{send_or_log, DeviceData};
 use crate::structs::LogDirection;
 
 pub struct ServerHandle {
@@ -34,15 +36,15 @@ impl ServerHandle {
         self.peripheral
             .update_characteristic(self.char_uuid, data)
             .await
-            .map_err(|e| format!("Update error: {}", e))
+            .map_err(|e| format!("Update error: {e}"))
     }
 
     pub fn set_value(&self, data: Vec<u8>) {
-        *self.shared_value.lock().unwrap() = data;
+        *self.shared_value.lock() = data;
     }
 
     pub fn get_value(&self) -> Vec<u8> {
-        self.shared_value.lock().unwrap().clone()
+        self.shared_value.lock().clone()
     }
 
     pub fn service_uuid(&self) -> Uuid {
@@ -67,13 +69,13 @@ pub async fn start_server(
 
     let mut peripheral = Peripheral::new(event_tx)
         .await
-        .map_err(|e| format!("Failed to create peripheral: {}", e))?;
+        .map_err(|e| format!("Failed to create peripheral: {e}"))?;
 
     let mut retries = 0;
     while !peripheral
         .is_powered()
         .await
-        .map_err(|e| format!("Power check failed: {}", e))?
+        .map_err(|e| format!("Power check failed: {e}"))?
     {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         retries += 1;
@@ -104,12 +106,12 @@ pub async fn start_server(
     peripheral
         .add_service(&service)
         .await
-        .map_err(|e| format!("Failed to add service: {}", e))?;
+        .map_err(|e| format!("Failed to add service: {e}"))?;
 
     peripheral
         .start_advertising(&server_name, &[service_uuid])
         .await
-        .map_err(|e| format!("Failed to start advertising: {}", e))?;
+        .map_err(|e| format!("Failed to start advertising: {e}"))?;
 
     let tx = app_tx.clone();
     let value_ref = Arc::clone(&shared_value);
@@ -127,6 +129,7 @@ pub async fn start_server(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn handle_peripheral_event(
     event: PeripheralEvent,
     tx: &mpsc::UnboundedSender<DeviceData>,
@@ -139,10 +142,13 @@ fn handle_peripheral_event(
             } else {
                 "Bluetooth adapter powered off".into()
             };
-            let _ = tx.send(DeviceData::ServerLog {
-                direction: LogDirection::Info,
-                message: msg,
-            });
+            send_or_log(
+                tx,
+                DeviceData::ServerLog {
+                    direction: LogDirection::Info,
+                    message: msg,
+                },
+            );
         }
         PeripheralEvent::CharacteristicSubscriptionUpdate {
             request,
@@ -153,31 +159,42 @@ fn handle_peripheral_event(
             } else {
                 "unsubscribed from"
             };
-            let _ = tx.send(DeviceData::ServerLog {
-                direction: LogDirection::Info,
-                message: format!("Client {} {}", action, request.characteristic),
-            });
+            send_or_log(
+                tx,
+                DeviceData::ServerLog {
+                    direction: LogDirection::Info,
+                    message: format!("Client {action} {}", request.characteristic),
+                },
+            );
         }
         PeripheralEvent::ReadRequest {
             request,
             offset,
             responder,
         } => {
-            let value = shared_value.lock().unwrap().clone();
+            let full = shared_value.lock().clone();
+            let offset_usize = offset.try_into().unwrap_or(usize::MAX).min(full.len());
+            let value = if offset_usize >= full.len() {
+                vec![]
+            } else {
+                full[offset_usize..].to_vec()
+            };
             let hex: String = value
                 .iter()
-                .map(|b| format!("{:02X}", b))
+                .map(|b| format!("{b:02X}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let _ = tx.send(DeviceData::ServerLog {
-                direction: LogDirection::Received,
-                message: format!(
-                    "Read request on {} (offset: {}), responding: {}",
-                    request.characteristic,
-                    offset,
-                    if hex.is_empty() { "(empty)" } else { &hex }
-                ),
-            });
+            send_or_log(
+                tx,
+                DeviceData::ServerLog {
+                    direction: LogDirection::Received,
+                    message: format!(
+                        "Read request on {} (offset: {offset}), responding: {}",
+                        request.characteristic,
+                        if hex.is_empty() { "(empty)" } else { &hex }
+                    ),
+                },
+            );
             let _ = responder.send(ReadRequestResponse {
                 value,
                 response: RequestResponse::Success,
@@ -189,18 +206,43 @@ fn handle_peripheral_event(
             value,
             responder,
         } => {
+            const MAX_CHARACTERISTIC_SIZE: usize = 512;
+            let offset_usize: usize = offset.try_into().unwrap_or(usize::MAX);
+            if offset_usize > MAX_CHARACTERISTIC_SIZE
+                || offset_usize.saturating_add(value.len()) > MAX_CHARACTERISTIC_SIZE
+            {
+                let _ = responder.send(WriteRequestResponse {
+                    response: RequestResponse::InvalidOffset,
+                });
+                return;
+            }
             let hex: String = value
                 .iter()
-                .map(|b| format!("{:02X}", b))
+                .map(|b| format!("{b:02X}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let _ = tx.send(DeviceData::ServerLog {
-                direction: LogDirection::Received,
-                message: format!(
-                    "Write request on {} (offset: {}): {}",
-                    request.characteristic, offset, hex
-                ),
-            });
+            send_or_log(
+                tx,
+                DeviceData::ServerLog {
+                    direction: LogDirection::Received,
+                    message: format!(
+                        "Write request on {} (offset: {offset}): {hex}",
+                        request.characteristic
+                    ),
+                },
+            );
+            {
+                let mut guard = shared_value.lock();
+                if offset_usize == 0 {
+                    *guard = value;
+                } else {
+                    let end = offset_usize + value.len();
+                    if end > guard.len() {
+                        guard.resize(end, 0);
+                    }
+                    guard[offset_usize..end].copy_from_slice(&value);
+                }
+            }
             let _ = responder.send(WriteRequestResponse {
                 response: RequestResponse::Success,
             });
@@ -402,6 +444,29 @@ mod tests {
     }
 
     #[test]
+    fn test_write_request_updates_shared_value() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let shared = make_shared_value(vec![]);
+        let (resp_tx, mut resp_rx) = oneshot::channel();
+
+        handle_peripheral_event(
+            PeripheralEvent::WriteRequest {
+                request: make_request(),
+                offset: 0,
+                value: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                responder: resp_tx,
+            },
+            &tx,
+            &shared,
+        );
+
+        let _ = recv_server_log(&mut rx);
+        let response = resp_rx.try_recv().unwrap();
+        assert_eq!(response.response, RequestResponse::Success);
+        assert_eq!(*shared.lock(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
     fn test_write_request_includes_offset() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let shared = make_shared_value(vec![]);
@@ -425,10 +490,11 @@ mod tests {
     #[test]
     fn test_shared_value_initially_empty() {
         let shared = make_shared_value(vec![]);
-        assert!(shared.lock().unwrap().is_empty());
+        assert!(shared.lock().is_empty());
     }
 
     #[test]
+    #[allow(clippy::similar_names)]
     fn test_shared_value_update_reflected_in_reads() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let shared = make_shared_value(vec![]);
@@ -447,7 +513,7 @@ mod tests {
         assert!(response1.value.is_empty());
         let _ = recv_server_log(&mut rx);
 
-        *shared.lock().unwrap() = vec![0xCA, 0xFE];
+        *shared.lock() = vec![0xCA, 0xFE];
 
         let (resp_tx2, mut resp_rx2) = oneshot::channel();
         handle_peripheral_event(
@@ -485,5 +551,49 @@ mod tests {
 
         let response = resp_rx.try_recv().unwrap();
         assert_eq!(response.response, RequestResponse::Success);
+    }
+
+    #[test]
+    fn test_write_request_rejects_offset_exceeding_max() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let shared = make_shared_value(vec![]);
+        let (resp_tx, mut resp_rx) = oneshot::channel();
+
+        handle_peripheral_event(
+            PeripheralEvent::WriteRequest {
+                request: make_request(),
+                offset: 513,
+                value: vec![0x01],
+                responder: resp_tx,
+            },
+            &tx,
+            &shared,
+        );
+
+        let response = resp_rx.try_recv().unwrap();
+        assert_eq!(response.response, RequestResponse::InvalidOffset);
+        assert!(shared.lock().is_empty());
+    }
+
+    #[test]
+    fn test_write_request_rejects_offset_plus_value_exceeding_max() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let shared = make_shared_value(vec![0u8; 100]);
+        let (resp_tx, mut resp_rx) = oneshot::channel();
+
+        handle_peripheral_event(
+            PeripheralEvent::WriteRequest {
+                request: make_request(),
+                offset: 450,
+                value: vec![0u8; 100],
+                responder: resp_tx,
+            },
+            &tx,
+            &shared,
+        );
+
+        let response = resp_rx.try_recv().unwrap();
+        assert_eq!(response.response, RequestResponse::InvalidOffset);
+        assert_eq!(shared.lock().len(), 100);
     }
 }

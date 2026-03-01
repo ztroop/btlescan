@@ -8,7 +8,7 @@ use std::{
 };
 
 #[cfg(feature = "server")]
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use ratatui::widgets::TableState;
 use tokio::sync::{
@@ -37,7 +37,10 @@ use crate::{
 
 pub enum DeviceData {
     DeviceInfo(Box<DeviceInfo>),
-    Characteristics(Vec<Characteristic>),
+    Characteristics {
+        device_id: String,
+        characteristics: Vec<Characteristic>,
+    },
     CharacteristicValue {
         uuid: Uuid,
         value: Vec<u8>,
@@ -64,12 +67,33 @@ pub enum DeviceData {
     },
 }
 
+/// Sends to the app channel; logs if receiver was dropped (e.g. during shutdown).
+pub(crate) fn send_or_log(tx: &mpsc::UnboundedSender<DeviceData>, data: DeviceData) {
+    if tx.send(data).is_err() {
+        eprintln!("btlescan: channel send failed (receiver dropped)");
+    }
+}
+
+/// Maximum number of log entries to retain. Smaller in tests for faster verification.
+#[cfg(test)]
+const MAX_LOG_ENTRIES: usize = 10;
+#[cfg(not(test))]
+const MAX_LOG_ENTRIES: usize = 1000;
+
+/// Maximum number of characteristic values to retain. Prevents unbounded memory growth with many UUIDs.
+const MAX_CHAR_VALUES: usize = 100;
+
+/// Maximum number of discovered devices to retain. Prevents unbounded memory growth in busy environments.
+pub(crate) const MAX_DEVICES: usize = 500;
+
+/// Maximum input buffer length (characters). Prevents unbounded memory growth from paste/typing.
+const MAX_INPUT_LEN: usize = 16 * 1024;
+
+#[allow(clippy::struct_excessive_bools)]
 pub struct App {
     pub rx: UnboundedReceiver<DeviceData>,
     pub tx: UnboundedSender<DeviceData>,
 
-    #[allow(dead_code)]
-    pub loading_status: Arc<AtomicBool>,
     pub pause_status: Arc<AtomicBool>,
     pub scan_shutdown: Option<oneshot::Sender<()>>,
     pub scan_handle: Option<tokio::task::JoinHandle<()>>,
@@ -92,6 +116,8 @@ pub struct App {
     pub selected_characteristics: Vec<Characteristic>,
     pub char_table_state: TableState,
     pub char_values: HashMap<Uuid, Vec<u8>>,
+    /// Insertion order for char_values; used to evict oldest when exceeding MAX_CHAR_VALUES.
+    char_values_order: Vec<Uuid>,
     pub subscribed_chars: HashSet<Uuid>,
 
     // Input
@@ -131,7 +157,6 @@ impl App {
         Self {
             tx,
             rx,
-            loading_status: Arc::new(AtomicBool::default()),
             pause_status: Arc::new(AtomicBool::default()),
             scan_shutdown: None,
             scan_handle: None,
@@ -150,6 +175,7 @@ impl App {
             selected_characteristics: Vec::new(),
             char_table_state: TableState::default(),
             char_values: HashMap::new(),
+            char_values_order: Vec::new(),
             subscribed_chars: HashSet::new(),
 
             input_buffer: String::new(),
@@ -180,13 +206,14 @@ impl App {
         }
     }
 
-    pub async fn scan(&mut self) {
+    pub fn scan(&mut self) {
+        self.pause_status.store(false, Ordering::SeqCst);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         self.scan_shutdown = Some(shutdown_tx);
         let pause_signal_clone = Arc::clone(&self.pause_status);
         let tx_clone = self.tx.clone();
         self.scan_handle = Some(tokio::spawn(async move {
-            bluetooth_scan(tx_clone, pause_signal_clone, shutdown_rx).await
+            bluetooth_scan(tx_clone, pause_signal_clone, shutdown_rx).await;
         }));
     }
 
@@ -201,37 +228,84 @@ impl App {
     }
 
     pub async fn connect(&mut self) {
-        let selected_device = self
-            .devices
-            .get(self.table_state.selected().unwrap_or(0))
-            .cloned();
+        if self.is_loading {
+            return;
+        }
+        let selected_idx = self
+            .table_state
+            .selected()
+            .unwrap_or(0)
+            .min(self.devices.len().saturating_sub(1));
+        let selected_device = self.devices.get(selected_idx).cloned();
 
         if let Some(device) = selected_device {
             self.stop_scan().await;
+            self.char_values.clear();
+            self.char_values_order.clear();
             self.is_loading = true;
             let device = Arc::new(device);
             self.connected_device = Some(Arc::clone(&device));
             let tx_clone = self.tx.clone();
             tokio::spawn(async move { connect_device(tx_clone, device).await });
+        } else {
+            self.error_message = "No device selected".to_string();
+            self.error_view = true;
         }
     }
 
-    pub async fn disconnect(&mut self) {
-        if let Some(device) = &self.connected_device {
+    /// Disconnects from the device. Returns a JoinHandle when a disconnect task was spawned,
+    /// which the caller may await for a clean shutdown (e.g. on quit).
+    pub fn disconnect(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        let handle = if let Some(device) = &self.connected_device {
             let device = Arc::clone(device);
             let tx_clone = self.tx.clone();
-            tokio::spawn(async move { disconnect_device(tx_clone, device).await });
-        }
+            Some(tokio::spawn(async move {
+                disconnect_device(tx_clone, device).await
+            }))
+        } else {
+            None
+        };
         self.is_connected = false;
+        self.is_loading = false;
         self.connected_device = None;
         self.selected_characteristics.clear();
         self.char_table_state = TableState::default();
         self.char_values.clear();
+        self.char_values_order.clear();
         self.subscribed_chars.clear();
         self.input_buffer.clear();
         self.cursor_position = 0;
         self.add_log(LogDirection::Info, "Disconnected from device".into());
-        self.scan().await;
+        self.scan();
+        handle
+    }
+
+    /// Clears connection state (used when Error is received while connected).
+    pub fn clear_connection_state(&mut self) {
+        self.connected_device = None;
+        self.is_connected = false;
+        self.selected_characteristics.clear();
+        self.char_table_state = TableState::default();
+        self.char_values.clear();
+        self.char_values_order.clear();
+        self.subscribed_chars.clear();
+    }
+
+    /// Inserts a characteristic value, evicting oldest entries when exceeding MAX_CHAR_VALUES.
+    pub fn insert_char_value(&mut self, uuid: Uuid, value: Vec<u8>) {
+        if self.char_values.contains_key(&uuid) {
+            self.char_values_order.retain(|u| *u != uuid);
+        }
+        self.char_values.insert(uuid, value);
+        self.char_values_order.push(uuid);
+        while self.char_values.len() > MAX_CHAR_VALUES {
+            if let Some(oldest) = self.char_values_order.first().copied() {
+                self.char_values_order.remove(0);
+                self.char_values.remove(&oldest);
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn read_selected_characteristic(&self) {
@@ -261,11 +335,11 @@ impl App {
         if let (Some(ch), Some(device)) = (char_opt, peripheral) {
             if let Some(handle) = ch.handle {
                 let hex_str = bytes_to_hex(&data);
-                self.add_log(LogDirection::Sent, format!("{} ({})", hex_str, handle.uuid));
+                self.add_log(LogDirection::Sent, format!("{hex_str} ({})", handle.uuid));
                 let tx = self.tx.clone();
                 let data_clone = data;
                 tokio::spawn(async move {
-                    write_characteristic_value(tx, device, handle, data_clone).await
+                    write_characteristic_value(tx, device, handle, data_clone).await;
                 });
                 self.input_buffer.clear();
                 self.cursor_position = 0;
@@ -290,7 +364,7 @@ impl App {
                 let tx = self.tx.clone();
                 if self.subscribed_chars.contains(&ch.uuid) {
                     tokio::spawn(async move {
-                        unsubscribe_from_notifications(tx, device, handle).await
+                        unsubscribe_from_notifications(tx, device, handle).await;
                     });
                 } else {
                     tokio::spawn(
@@ -308,6 +382,10 @@ impl App {
 
     pub fn add_log(&mut self, direction: LogDirection, message: String) {
         self.message_log.push(LogEntry::new(direction, message));
+        if self.message_log.len() > MAX_LOG_ENTRIES {
+            self.message_log
+                .drain(0..(self.message_log.len() - MAX_LOG_ENTRIES));
+        }
         self.log_scroll = self.message_log.len().saturating_sub(1);
     }
 
@@ -335,7 +413,7 @@ impl App {
         let service_uuid = match Uuid::parse_str(&self.server_service_uuid) {
             Ok(u) => u,
             Err(e) => {
-                self.error_message = format!("Invalid service UUID: {}", e);
+                self.error_message = format!("Invalid service UUID: {e}");
                 self.error_view = true;
                 return;
             }
@@ -343,7 +421,7 @@ impl App {
         let char_uuid = match Uuid::parse_str(&self.server_char_uuid) {
             Ok(u) => u,
             Err(e) => {
-                self.error_message = format!("Invalid characteristic UUID: {}", e);
+                self.error_message = format!("Invalid characteristic UUID: {e}");
                 self.error_view = true;
                 return;
             }
@@ -358,8 +436,8 @@ impl App {
                 self.add_log(LogDirection::Info, "GATT server advertising started".into());
             }
             Err(e) => {
-                self.add_log(LogDirection::Error, format!("Server start failed: {}", e));
-                self.error_message = format!("Server start failed: {}", e);
+                self.add_log(LogDirection::Error, format!("Server start failed: {e}"));
+                self.error_message = format!("Server start failed: {e}");
                 self.error_view = true;
             }
         }
@@ -371,16 +449,22 @@ impl App {
             handle.stop().await;
         }
         self.is_advertising = false;
-        *self.server_shared_value.lock().unwrap() = Vec::new();
+        *self.server_shared_value.lock() = Vec::new();
         self.add_log(LogDirection::Info, "GATT server stopped".into());
     }
 
     #[cfg(feature = "server")]
     pub fn set_server_char_value(&mut self, data: Vec<u8>) {
+        const MAX_CHARACTERISTIC_SIZE: usize = 512;
+        let data = if data.len() > MAX_CHARACTERISTIC_SIZE {
+            data.into_iter().take(MAX_CHARACTERISTIC_SIZE).collect()
+        } else {
+            data
+        };
         let hex_str = bytes_to_hex(&data);
         if let Some(handle) = &self.server_handle {
             handle.set_value(data);
-            self.add_log(LogDirection::Info, format!("Value set: {}", hex_str));
+            self.add_log(LogDirection::Info, format!("Value set: {hex_str}"));
         }
     }
 
@@ -397,11 +481,11 @@ impl App {
             }
             let hex_str = bytes_to_hex(&value);
             match handle.update_value(value).await {
-                Ok(_) => {
-                    self.add_log(LogDirection::Sent, format!("Notify: {}", hex_str));
+                Ok(()) => {
+                    self.add_log(LogDirection::Sent, format!("Notify: {hex_str}"));
                 }
                 Err(e) => {
-                    self.add_log(LogDirection::Error, format!("Notify failed: {}", e));
+                    self.add_log(LogDirection::Error, format!("Notify failed: {e}"));
                 }
             }
         }
@@ -409,7 +493,7 @@ impl App {
 
     #[cfg(feature = "server")]
     pub fn get_server_char_value(&self) -> Vec<u8> {
-        self.server_shared_value.lock().unwrap().clone()
+        self.server_shared_value.lock().clone()
     }
 
     #[cfg(feature = "server")]
@@ -433,11 +517,23 @@ impl App {
     pub fn parse_input(&self) -> Result<Vec<u8>, String> {
         match self.data_format {
             DataFormat::Hex => hex_to_bytes(&self.input_buffer),
-            DataFormat::Text => Ok(self.input_buffer.as_bytes().to_vec()),
+            DataFormat::Text => {
+                if self.input_buffer.len() > MAX_INPUT_LEN {
+                    Err(format!(
+                        "Input exceeds maximum length of {} characters",
+                        MAX_INPUT_LEN
+                    ))
+                } else {
+                    Ok(self.input_buffer.as_bytes().to_vec())
+                }
+            }
         }
     }
 
     pub fn insert_char(&mut self, c: char) {
+        if self.input_buffer.len() >= MAX_INPUT_LEN {
+            return;
+        }
         self.input_buffer.insert(self.cursor_position, c);
         self.cursor_position += c.len_utf8();
     }
@@ -447,17 +543,39 @@ impl App {
             let prev = self.input_buffer[..self.cursor_position]
                 .chars()
                 .last()
-                .map_or(0, |c| c.len_utf8());
+                .map_or(0, char::len_utf8);
             self.cursor_position -= prev;
             self.input_buffer.remove(self.cursor_position);
+        }
+    }
+
+    /// Move cursor left by one character (respects UTF-8 boundaries).
+    pub fn cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            let prev = self.input_buffer[..self.cursor_position]
+                .chars()
+                .last()
+                .map_or(0, char::len_utf8);
+            self.cursor_position -= prev;
+        }
+    }
+
+    /// Move cursor right by one character (respects UTF-8 boundaries).
+    pub fn cursor_right(&mut self) {
+        if self.cursor_position < self.input_buffer.len() {
+            let next = self.input_buffer[self.cursor_position..]
+                .chars()
+                .next()
+                .map_or(1, char::len_utf8);
+            self.cursor_position += next;
         }
     }
 
     pub fn get_devices_csv(&self) -> Result<String, Box<dyn Error>> {
         let now = chrono::Local::now();
         let timestamp = now.format("%Y-%m-%d_%H-%M-%S").to_string();
-        let file_path = format!("btlescan_{}.csv", timestamp);
-        let file = std::fs::File::create(file_path).expect("Unable to create file");
+        let file_path = format!("btlescan_{timestamp}.csv");
+        let file = std::fs::File::create(&file_path)?;
         let mut wtr = csv::Writer::from_writer(file);
         for device in &self.devices {
             wtr.serialize(DeviceCsv {
@@ -469,7 +587,10 @@ impl App {
             })?;
         }
         wtr.flush()?;
-        Ok("Devices exported to a CSV file in the current directory.".to_string())
+        let full_path = std::path::Path::new(&file_path)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(&file_path));
+        Ok(format!("Devices exported to {}", full_path.display()))
     }
 }
 
@@ -490,6 +611,24 @@ mod tests {
         assert!(app.message_log.is_empty());
         #[cfg(feature = "server")]
         assert_eq!(app.server_name, "btlescan");
+    }
+
+    #[tokio::test]
+    async fn test_connect_no_device_selected_shows_error() {
+        let mut app = App::new();
+        app.devices.clear();
+        app.connect().await;
+        assert_eq!(app.error_message, "No device selected");
+        assert!(app.error_view);
+    }
+
+    #[tokio::test]
+    async fn test_scan_resets_pause_status() {
+        let mut app = App::new();
+        app.pause_status.store(true, Ordering::SeqCst);
+        assert!(app.pause_status.load(Ordering::SeqCst));
+        app.scan(); // spawns tokio task, requires runtime
+        assert!(!app.pause_status.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -534,6 +673,17 @@ mod tests {
         assert_eq!(app.message_log.len(), 1);
         assert_eq!(app.message_log[0].message, "Test message");
         assert_eq!(app.message_log[0].direction, LogDirection::Info);
+    }
+
+    #[test]
+    fn test_add_log_truncates_when_over_limit() {
+        let mut app = App::new();
+        for i in 0..15 {
+            app.add_log(LogDirection::Info, format!("msg {i}"));
+        }
+        assert_eq!(app.message_log.len(), 10);
+        assert_eq!(app.message_log[0].message, "msg 5");
+        assert_eq!(app.message_log[9].message, "msg 14");
     }
 
     #[test]
@@ -584,16 +734,50 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_char_caps_at_max() {
+        let mut app = App::new();
+        for _ in 0..(MAX_INPUT_LEN + 10) {
+            app.insert_char('x');
+        }
+        assert_eq!(app.input_buffer.len(), MAX_INPUT_LEN);
+    }
+
+    #[test]
+    fn test_parse_input_text_exceeds_max() {
+        let mut app = App::new();
+        app.data_format = DataFormat::Text;
+        app.input_buffer = "x".repeat(MAX_INPUT_LEN + 1);
+        assert!(app.parse_input().is_err());
+    }
+
+    #[test]
     fn test_selected_characteristic_none() {
         let app = App::new();
         assert!(app.selected_characteristic().is_none());
     }
 
     #[test]
+    fn test_get_devices_csv_returns_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+        let _guard = scopeguard::guard((), |()| {
+            let _ = std::env::set_current_dir(&original_cwd);
+        });
+
+        let app = App::new();
+        let result = app.get_devices_csv().unwrap();
+
+        assert!(result.starts_with("Devices exported to "));
+        assert!(result.contains("btlescan_"));
+        assert!(result.contains(".csv"));
+    }
+
+    #[test]
     fn test_log_scroll_follows_latest() {
         let mut app = App::new();
         for i in 0..10 {
-            app.add_log(LogDirection::Info, format!("msg {}", i));
+            app.add_log(LogDirection::Info, format!("msg {i}"));
         }
         assert_eq!(app.log_scroll, 9);
     }
@@ -627,6 +811,27 @@ mod tests {
         assert_eq!(
             app.server_field_value(&ServerField::ServiceUuid),
             "b42e2a68-ade7-11e4-89d3-123b93f75cba"
+        );
+    }
+
+    #[test]
+    fn test_insert_char_value_caps_at_max() {
+        let mut app = App::new();
+        for i in 0..=MAX_CHAR_VALUES {
+            let uuid = Uuid::parse_str(&format!("00000000-0000-1000-8000-{:012x}", i)).unwrap();
+            app.insert_char_value(uuid, vec![i as u8]);
+        }
+        assert_eq!(app.char_values.len(), MAX_CHAR_VALUES);
+        assert_eq!(app.char_values_order.len(), MAX_CHAR_VALUES);
+        // Oldest (uuid 0) should have been evicted
+        let uuid_0 = Uuid::parse_str("00000000-0000-1000-8000-000000000000").unwrap();
+        assert!(!app.char_values.contains_key(&uuid_0));
+        // Newest (uuid MAX_CHAR_VALUES) should be present
+        let uuid_newest =
+            Uuid::parse_str(&format!("00000000-0000-1000-8000-{:012x}", MAX_CHAR_VALUES)).unwrap();
+        assert_eq!(
+            app.char_values.get(&uuid_newest),
+            Some(&vec![MAX_CHAR_VALUES as u8])
         );
     }
 
