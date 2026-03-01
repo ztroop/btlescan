@@ -84,7 +84,7 @@ mod tests {
     fn test_message_log_scroll() {
         let entries: Vec<LogEntry> = (0..20)
             .map(|i| {
-                LogEntry::with_timestamp("00:00:00.000", LogDirection::Info, format!("msg {}", i))
+                LogEntry::with_timestamp("00:00:00.000", LogDirection::Info, format!("msg {i}"))
             })
             .collect();
         let _table = message_log(&entries, 15, 8, false);

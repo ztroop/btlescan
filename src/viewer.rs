@@ -11,10 +11,10 @@ use std::error::Error;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::app::{App, DeviceData};
+use crate::app::{App, DeviceData, MAX_DEVICES};
 #[cfg(feature = "server")]
 use crate::structs::ServerField;
-use crate::structs::{AppMode, DeviceInfo, FocusPanel, InputMode, LogDirection};
+use crate::structs::{AppMode, FocusPanel, InputMode, LogDirection};
 use crate::utils::{bytes_to_hex, centered_rect};
 use crate::widgets::characteristic_panel::characteristic_panel;
 use crate::widgets::detail_table::detail_table;
@@ -32,7 +32,9 @@ pub async fn viewer<B: Backend>(
 where
     <B as Backend>::Error: 'static,
 {
-    app.table_state.select(Some(0));
+    if !app.devices.is_empty() {
+        app.table_state.select(Some(0));
+    }
 
     loop {
         terminal.draw(|f| {
@@ -56,42 +58,63 @@ where
         })?;
 
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if app.error_view {
-                    if matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
-                        app.error_view = false;
+            match event::read()? {
+                Event::Key(key) => {
+                    if app.error_view {
+                        if matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
+                            app.error_view = false;
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                if app.input_mode == InputMode::Editing {
-                    handle_editing_input(app, key.code);
-                    continue;
-                }
+                    if app.input_mode == InputMode::Editing {
+                        handle_editing_input(app, key.code);
+                        continue;
+                    }
 
-                match app.mode {
-                    AppMode::Client => handle_client_input(app, key.code).await,
-                    #[cfg(feature = "server")]
-                    AppMode::Server => handle_server_input(app, key.code).await,
-                }
+                    match app.mode {
+                        AppMode::Client => handle_client_input(app, key.code).await,
+                        #[cfg(feature = "server")]
+                        AppMode::Server => handle_server_input(app, key.code).await,
+                    }
 
-                if app.should_quit {
-                    return Ok(());
+                    if app.should_quit {
+                        let disconnect_handle = app
+                            .connected_device
+                            .is_some()
+                            .then(|| app.disconnect())
+                            .flatten();
+                        app.stop_scan().await;
+                        #[cfg(feature = "server")]
+                        if app.is_advertising {
+                            app.stop_server().await;
+                        }
+                        if let Some(h) = disconnect_handle {
+                            let _ = h.await;
+                        }
+                        return Ok(());
+                    }
                 }
+                Event::Paste(data) => {
+                    if app.input_mode == InputMode::Editing {
+                        for c in data.chars() {
+                            app.insert_char(c);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
         let was_loading = app.is_loading;
         process_channel_messages(app);
         if was_loading && !app.is_loading && !app.is_connected {
-            app.scan().await;
+            app.scan();
         }
     }
 }
 
 fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
-    app.frame_count += 1;
-
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -115,19 +138,20 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(outer[1]);
 
-    let device_binding = &DeviceInfo::default();
-    let selected_device = app
-        .devices
-        .get(app.table_state.selected().unwrap_or(0))
-        .unwrap_or(device_binding);
+    let selected_idx = app
+        .table_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.devices.len().saturating_sub(1));
+    let selected_device = app.devices.get(selected_idx);
 
     // Device table (top-left)
-    let dev_table = device_table(
+    let device_table_widget = device_table(
         app.table_state.selected(),
         &app.devices,
         app.focus == FocusPanel::DeviceList,
     );
-    f.render_stateful_widget(dev_table, top_row[0], &mut app.table_state);
+    f.render_stateful_widget(device_table_widget, top_row[0], &mut app.table_state);
 
     // Characteristics panel (top-right)
     let char_panel = characteristic_panel(
@@ -137,25 +161,21 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
         &app.subscribed_chars,
         app.focus == FocusPanel::Characteristics,
     );
-    f.render_widget(char_panel, top_row[1]);
+    f.render_stateful_widget(char_panel, top_row[1], &mut app.char_table_state);
 
     // Detail table (mid-left)
     let is_selected_device_connected = app.is_connected
-        && app
-            .connected_device
-            .as_ref()
-            .map(|d| d.get_id() == selected_device.get_id())
-            .unwrap_or(false);
-    let det_table = detail_table(selected_device, is_selected_device_connected);
-    f.render_widget(det_table, mid_row[0]);
+        && selected_device
+            .zip(app.connected_device.as_deref())
+            .is_some_and(|(sel, conn)| sel.get_id() == conn.get_id());
+    let detail_table_widget = detail_table(selected_device, is_selected_device_connected);
+    f.render_widget(detail_table_widget, mid_row[0]);
 
     // Read/Write panel (mid-right)
     let selected_char = app.selected_characteristic();
     let char_uuid = selected_char.map(|c| c.uuid);
     let char_value = char_uuid.and_then(|u| app.char_values.get(&u));
-    let is_subscribed = char_uuid
-        .map(|u| app.subscribed_chars.contains(&u))
-        .unwrap_or(false);
+    let is_subscribed = char_uuid.is_some_and(|u| app.subscribed_chars.contains(&u));
 
     let rw = rw_panel(
         selected_char,
@@ -183,8 +203,8 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
         &app.input_mode,
         app.is_connected,
         app.pause_status.load(Ordering::SeqCst),
-        &app.is_loading,
-        &app.frame_count,
+        app.is_loading,
+        app.frame_count,
         false,
     );
     f.render_widget(info, outer[3]);
@@ -192,8 +212,6 @@ fn draw_client_mode(f: &mut ratatui::Frame, app: &mut App) {
 
 #[cfg(feature = "server")]
 fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
-    app.frame_count += 1;
-
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -230,8 +248,8 @@ fn draw_server_mode(f: &mut ratatui::Frame, app: &mut App) {
         &app.input_mode,
         false,
         false,
-        &app.is_loading,
-        &app.frame_count,
+        app.is_loading,
+        app.frame_count,
         app.is_advertising,
     );
     f.render_widget(info, outer[2]);
@@ -293,19 +311,16 @@ fn handle_editing_input(app: &mut App, key: KeyCode) {
             app.insert_char(c);
         }
         KeyCode::Left => {
-            if app.cursor_position > 0 {
-                app.cursor_position -= 1;
-            }
+            app.cursor_left();
         }
         KeyCode::Right => {
-            if app.cursor_position < app.input_buffer.len() {
-                app.cursor_position += 1;
-            }
+            app.cursor_right();
         }
         _ => {}
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn handle_client_input(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('q') => {
@@ -340,13 +355,17 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
             app.connect().await;
         }
         KeyCode::Char('d') if app.is_connected => {
-            let selected = app.devices.get(app.table_state.selected().unwrap_or(0));
+            let selected_idx = app
+                .table_state
+                .selected()
+                .unwrap_or(0)
+                .min(app.devices.len().saturating_sub(1));
+            let selected = app.devices.get(selected_idx);
             let is_viewing_connected = selected
                 .zip(app.connected_device.as_deref())
-                .map(|(sel, conn)| sel.get_id() == conn.get_id())
-                .unwrap_or(false);
+                .is_some_and(|(sel, conn)| sel.get_id() == conn.get_id());
             if is_viewing_connected {
-                app.disconnect().await;
+                app.disconnect();
             }
         }
         KeyCode::Char('r') if app.is_connected => {
@@ -375,16 +394,12 @@ async fn handle_client_input(app: &mut App, key: KeyCode) {
                 .unwrap_or_default();
             let was_subscribed = app
                 .selected_characteristic()
-                .map(|c| app.subscribed_chars.contains(&c.uuid))
-                .unwrap_or(false);
+                .is_some_and(|c| app.subscribed_chars.contains(&c.uuid));
             app.toggle_subscribe();
             if was_subscribed {
-                app.add_log(
-                    LogDirection::Info,
-                    format!("Unsubscribing from {}", uuid_str),
-                );
+                app.add_log(LogDirection::Info, format!("Unsubscribing from {uuid_str}"));
             } else {
-                app.add_log(LogDirection::Info, format!("Subscribing to {}", uuid_str));
+                app.add_log(LogDirection::Info, format!("Subscribing to {uuid_str}"));
             }
         }
         KeyCode::Char('t') if app.focus == FocusPanel::ReadWrite => {
@@ -470,7 +485,7 @@ async fn handle_server_input(app: &mut App, key: KeyCode) {
                 app.stop_server().await;
             }
             app.toggle_mode();
-            app.scan().await;
+            app.scan();
         }
         KeyCode::Char('a') if !app.is_advertising => {
             app.start_server().await;
@@ -530,58 +545,105 @@ fn process_channel_messages(app: &mut App) {
                     existing.device = device.device;
                 } else {
                     app.devices.push(device);
+                    if app.devices.len() > MAX_DEVICES {
+                        let excess = app.devices.len() - MAX_DEVICES;
+                        let connected_id = app.connected_device.as_ref().map(|d| d.get_id());
+                        let indices_to_remove: Vec<usize> = (0..excess)
+                            .filter(|&i| {
+                                connected_id
+                                    .as_ref()
+                                    .is_none_or(|cid| app.devices[i].get_id() != *cid)
+                            })
+                            .collect();
+                        let removed_before_selected = indices_to_remove
+                            .iter()
+                            .filter(|&&i| i < app.table_state.selected().unwrap_or(0))
+                            .count();
+                        for i in indices_to_remove.into_iter().rev() {
+                            app.devices.remove(i);
+                        }
+                        let selected = app.table_state.selected().unwrap_or(0);
+                        let new_selected = selected
+                            .saturating_sub(removed_before_selected)
+                            .min(app.devices.len().saturating_sub(1));
+                        app.table_state.select(if app.devices.is_empty() {
+                            None
+                        } else {
+                            Some(new_selected)
+                        });
+                    }
                 }
-                if app.table_state.selected().is_none() {
+                if app.table_state.selected().is_none() && !app.devices.is_empty() {
                     app.table_state.select(Some(0));
                 }
             }
-            DeviceData::Characteristics(characteristics) => {
-                app.selected_characteristics = characteristics;
-                app.is_connected = true;
-                app.is_loading = false;
-                if !app.selected_characteristics.is_empty() {
-                    app.char_table_state.select(Some(0));
+            DeviceData::Characteristics {
+                device_id,
+                characteristics,
+            } => {
+                let matches = app
+                    .connected_device
+                    .as_ref()
+                    .is_some_and(|d| d.get_id() == device_id);
+                if matches {
+                    app.selected_characteristics = characteristics;
+                    app.is_connected = true;
+                    app.is_loading = false;
+                    if !app.selected_characteristics.is_empty() {
+                        app.char_table_state.select(Some(0));
+                    }
+                    app.add_log(
+                        LogDirection::Info,
+                        format!(
+                            "Connected — {} characteristics discovered",
+                            app.selected_characteristics.len()
+                        ),
+                    );
                 }
-                app.add_log(
-                    LogDirection::Info,
-                    format!(
-                        "Connected — {} characteristics discovered",
-                        app.selected_characteristics.len()
-                    ),
-                );
             }
             DeviceData::CharacteristicValue { uuid, value } => {
-                let hex = bytes_to_hex(&value);
-                app.add_log(LogDirection::Received, format!("{} ({})", hex, uuid));
-                app.char_values.insert(uuid, value);
+                if app.connected_device.is_some() {
+                    let hex = bytes_to_hex(&value);
+                    app.add_log(LogDirection::Received, format!("{hex} ({uuid})"));
+                    app.insert_char_value(uuid, value);
+                }
             }
             DeviceData::Notification { uuid, value } => {
-                let hex = bytes_to_hex(&value);
-                app.add_log(LogDirection::Received, format!("{} ({})", hex, uuid));
-                app.char_values.insert(uuid, value);
+                if app.connected_device.is_some() {
+                    let hex = bytes_to_hex(&value);
+                    app.add_log(LogDirection::Received, format!("{hex} ({uuid})"));
+                    app.insert_char_value(uuid, value);
+                }
             }
             DeviceData::WriteComplete { uuid } => {
-                app.add_log(LogDirection::Info, format!("Write complete ({})", uuid));
+                app.add_log(LogDirection::Info, format!("Write complete ({uuid})"));
             }
             DeviceData::SubscribeComplete { uuid } => {
-                app.subscribed_chars.insert(uuid);
-                app.add_log(
-                    LogDirection::Info,
-                    format!("Subscribed to notifications ({})", uuid),
-                );
+                if app.connected_device.is_some() {
+                    app.subscribed_chars.insert(uuid);
+                    app.add_log(
+                        LogDirection::Info,
+                        format!("Subscribed to notifications ({uuid})"),
+                    );
+                }
             }
             DeviceData::UnsubscribeComplete { uuid } => {
-                app.subscribed_chars.remove(&uuid);
-                app.add_log(
-                    LogDirection::Info,
-                    format!("Unsubscribed from notifications ({})", uuid),
-                );
+                if app.connected_device.is_some() {
+                    app.subscribed_chars.remove(&uuid);
+                    app.add_log(
+                        LogDirection::Info,
+                        format!("Unsubscribed from notifications ({uuid})"),
+                    );
+                }
             }
             DeviceData::Error(error) => {
                 app.add_log(LogDirection::Error, error.clone());
                 app.error_message = error;
                 app.error_view = true;
                 app.is_loading = false;
+                if app.connected_device.is_some() {
+                    app.clear_connection_state();
+                }
             }
             DeviceData::Info(info) => {
                 app.add_log(LogDirection::Info, info);

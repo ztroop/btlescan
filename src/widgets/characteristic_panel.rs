@@ -44,7 +44,8 @@ pub fn characteristic_panel<'a>(
                 ""
             };
 
-            let uuid_short = &ch.uuid.to_string()[..8];
+            let uuid_str = ch.uuid.to_string();
+            let uuid_short: &str = uuid_str.get(..8).unwrap_or(&uuid_str);
 
             let style = if selected == Some(i) && focused {
                 Style::default().add_modifier(Modifier::REVERSED)
