@@ -1,8 +1,41 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
+use uuid::Uuid;
 
 use crate::{company_codes::get_company_name, structs::ManufacturerData};
+
+/// ASTM F3411 Remote ID service UUID (0xFFFA) in its 128-bit Bluetooth base form.
+const REMOTE_ID_UUID: Uuid = Uuid::from_u128(0x0000FFFA_0000_1000_8000_00805F9B34FB);
+
+/// Decodes drone Remote ID (ASTM F3411 / ASD-STAN) from the 0xFFFA service data,
+/// returning the aircraft ID, position and operator location for display.
+pub fn extract_remote_id(service_data: &HashMap<Uuid, Vec<u8>>) -> Option<String> {
+    let ble = remoteid::ble::parse_service_data(service_data.get(&REMOTE_ID_UUID)?).ok()?;
+    let mut uas = remoteid::UasData::default();
+    uas.update_frame(&ble.frame().ok()?);
+    let mut parts = Vec::new();
+    if let Some(id) = uas.primary_id() {
+        parts.push(format!("ID {id}"));
+    }
+    if let Some(loc) = &uas.location {
+        parts.push(format!("UA {:.5},{:.5}", loc.latitude, loc.longitude));
+        if let Some(alt) = loc.altitude_geo {
+            parts.push(format!("{alt:.0} m"));
+        }
+    }
+    if let Some(sys) = &uas.system {
+        parts.push(format!(
+            "Operator {:.5},{:.5}",
+            sys.operator_latitude, sys.operator_longitude
+        ));
+    }
+    Some(if parts.is_empty() {
+        "Remote ID (no fields yet)".to_string()
+    } else {
+        parts.join(" | ")
+    })
+}
 
 /// Extracts manufacturer data for display. When multiple entries exist, uses the
 /// smallest company ID for deterministic display; hex data is joined from all entries.
@@ -179,6 +212,43 @@ mod tests {
         assert_eq!(result.height, 50);
         assert_eq!(result.x, 0);
         assert_eq!(result.y, 0);
+    }
+
+    #[test]
+    fn test_extract_remote_id() {
+        use remoteid::{
+            ble, BasicId, IdType, Location, Message, MessagePackBuilder, System, UaType,
+        };
+        let mut pack = MessagePackBuilder::new();
+        let id = BasicId::new(
+            IdType::SerialNumber,
+            UaType::HelicopterOrMultirotor,
+            "1596F3RWX8B9",
+        );
+        pack.push(&Message::BasicId(id.unwrap())).unwrap();
+        let loc = Location {
+            latitude: 40.7128,
+            longitude: -74.006,
+            altitude_geo: Some(120.0),
+            ..Location::default()
+        };
+        pack.push(&Message::Location(loc)).unwrap();
+        let sys = System {
+            operator_latitude: 40.71,
+            operator_longitude: -74.0,
+            ..System::default()
+        };
+        pack.push(&Message::System(sys)).unwrap();
+        let mut data = vec![ble::APP_CODE, 7];
+        data.extend_from_slice(pack.as_bytes());
+
+        let mut service_data = HashMap::new();
+        service_data.insert(REMOTE_ID_UUID, data);
+        assert_eq!(
+            extract_remote_id(&service_data).unwrap(),
+            "ID 1596F3RWX8B9 | UA 40.71280,-74.00600 | 120 m | Operator 40.71000,-74.00000"
+        );
+        assert_eq!(extract_remote_id(&HashMap::new()), None);
     }
 
     #[test]
