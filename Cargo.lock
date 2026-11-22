@@ -226,6 +226,7 @@ dependencies = [
  "futures",
  "parking_lot",
  "ratatui",
+ "remoteid",
  "scopeguard",
  "serde",
  "tempfile",
@@ -1621,6 +1622,12 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "remoteid"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "212a4b231e5b2a71fd5c1fb52a103d2ec345d1e55676a4508c866505b71a4807"
 
 [[package]]
 name = "rustc_version"

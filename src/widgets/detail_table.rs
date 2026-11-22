@@ -4,7 +4,10 @@ use ratatui::{
     widgets::{Block, Borders, Row, Table},
 };
 
-use crate::{structs::DeviceInfo, utils::extract_manufacturer_data};
+use crate::{
+    structs::DeviceInfo,
+    utils::{extract_manufacturer_data, extract_remote_id},
+};
 
 pub fn detail_table(selected_device: Option<&DeviceInfo>, is_connected: bool) -> Table<'_> {
     let rows = match selected_device {
@@ -16,7 +19,7 @@ pub fn detail_table(selected_device: Option<&DeviceInfo>, is_connected: bool) ->
             } else {
                 ("Disconnected".to_string(), Color::DarkGray)
             };
-            let rows = vec![
+            let mut rows = vec![
                 Row::new(vec!["Status:".to_owned(), status.0.clone()])
                     .style(Style::default().fg(status.1)),
                 Row::new(vec!["Detected At:".to_owned(), device.detected_at.clone()]),
@@ -30,6 +33,9 @@ pub fn detail_table(selected_device: Option<&DeviceInfo>, is_connected: bool) ->
                     manufacturer_data.data,
                 ]),
             ];
+            if let Some(remote_id) = extract_remote_id(&device.service_data) {
+                rows.push(Row::new(vec!["Remote ID:".to_owned(), remote_id]));
+            }
             rows
         }
         None => vec![
